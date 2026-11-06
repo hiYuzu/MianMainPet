@@ -1,3 +1,4 @@
+using MianMianPet.Configuration;
 using MianMianPet.Models;
 
 namespace MianMianPet.Services;
@@ -16,7 +17,7 @@ public sealed class ConversationService
     {
         var contextStartId = await GetContextStartIdAsync();
         var history = await _database.GetRecentMessagesAsync(
-            InternalAiConfig.ContextMessageCount,
+            LocalConfig.Current.Ai.ContextMessageCount,
             contextStartId);
         var selected = new LinkedList<ChatMessage>();
         var totalCharacters = currentUserMessage.Content.Length;
@@ -24,7 +25,7 @@ public sealed class ConversationService
         for (var i = history.Count - 1; i >= 0; i--)
         {
             var message = history[i];
-            if (totalCharacters + message.Content.Length > InternalAiConfig.MaxContextCharacters)
+            if (totalCharacters + message.Content.Length > LocalConfig.Current.Ai.MaxContextCharacters)
             {
                 break;
             }
@@ -57,7 +58,7 @@ public sealed class ConversationService
     {
         var contextStartId = await GetContextStartIdAsync();
         var history = await _database.GetRecentMessagesAsync(
-            InternalAiConfig.ContextMessageCount,
+            LocalConfig.Current.Ai.ContextMessageCount,
             contextStartId);
         return history.LastOrDefault(message => message.Role == "assistant")?.Content;
     }

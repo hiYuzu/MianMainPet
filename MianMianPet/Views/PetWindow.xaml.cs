@@ -59,21 +59,27 @@ public partial class PetWindow : Window
         _stateController = new PetStateController(PetArtwork);
         _ambientTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
-            Interval = PetExperienceConfig.AmbientIdleDelay
+            Interval = LocalConfig.Current.Experience.AmbientIdleDelay
         };
         _ambientTimer.Tick += AmbientTimer_OnTick;
         _sleepTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
-            Interval = PetExperienceConfig.SleepIdleDelay
+            Interval = LocalConfig.Current.Experience.SleepIdleDelay
         };
         _sleepTimer.Tick += SleepTimer_OnTick;
         _companionTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
         _companionTimer.Tick += CompanionTimer_OnTick;
         _dayPhaseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
-            Interval = PetExperienceConfig.DayPhaseRefreshInterval
+            Interval = LocalConfig.Current.Experience.DayPhaseRefreshInterval
         };
         _dayPhaseTimer.Tick += DayPhaseTimer_OnTick;
+        _fullScreenTimer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(250)
+        };
+        _fullScreenTimer.Tick += FullScreenTimer_OnTick;
+        InitializePlayTimers();
         _viewModel.FocusInputRequested += ViewModel_OnFocusInputRequested;
         _viewModel.StateRequested += ViewModel_OnStateRequested;
         _viewModel.PropertyChanged += ViewModel_OnPropertyChanged;
@@ -101,10 +107,16 @@ public partial class PetWindow : Window
 
     public void AllowClose() => _allowClose = true;
 
-    public void RegisterExternalInteraction() => RegisterInteraction();
+    public void RegisterExternalInteraction()
+    {
+        CancelPlay();
+        RegisterInteraction();
+    }
 
     private async void Window_OnLoaded(object sender, RoutedEventArgs e)
     {
+        RefreshFullScreenSuppression();
+        _fullScreenTimer.Start();
         if (_inputWindow is null)
         {
             _inputWindow = new InputWindow(_viewModel)
@@ -138,11 +150,15 @@ public partial class PetWindow : Window
             SetDefaultPosition();
         }
 
-        UpdateDayPhase();
-        _dayPhaseTimer.Start();
+        if (!RefreshFullScreenSuppression())
+        {
+            UpdateDayPhase();
+            _dayPhaseTimer.Start();
+        }
         RestartIdleTimers();
         ScheduleNextCompanionMessage();
         Opacity = 1;
+        await LoadPlayHistoryAsync();
     }
 
     private void Window_OnPreviewMouseDown(object sender, MouseButtonEventArgs e) => RegisterInteraction();
@@ -309,12 +325,18 @@ public partial class PetWindow : Window
 
     private void ViewModel_OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(PetViewModel.IsBubbleOpen) or nameof(PetViewModel.HasGift))
+            RefreshFullScreenSuppression();
         if (e.PropertyName is nameof(PetViewModel.InputText) or
             nameof(PetViewModel.IsInputOpen) or
             nameof(PetViewModel.IsBusy))
         {
+            if (_play.IsActive && (_viewModel.IsInputOpen || _viewModel.IsBusy)) CancelPlay();
             RegisterInteraction();
         }
+
+        if (e.PropertyName == nameof(PetViewModel.IsBubbleOpen) && _viewModel.IsBubbleOpen && _play.IsActive)
+            CancelPlay();
 
         if (e.PropertyName != nameof(PetViewModel.IsInputOpen))
         {
@@ -333,7 +355,7 @@ public partial class PetWindow : Window
 
     private void ShowInputWindow()
     {
-        if (_inputWindow is null)
+        if (RefreshFullScreenSuppression() || _inputWindow is null)
         {
             return;
         }
@@ -346,6 +368,7 @@ public partial class PetWindow : Window
 
     private void PositionInputWindow()
     {
+        if (PlayPopup.IsOpen) PlayPopup_OnOpened(this, EventArgs.Empty);
         if (_inputWindow is not null && _viewModel.IsInputOpen)
         {
             ScreenPlacementHelper.PlaceFloatingWindow(this, _inputWindow);
@@ -378,6 +401,9 @@ public partial class PetWindow : Window
         }
 
         _viewModel.FocusInputRequested -= ViewModel_OnFocusInputRequested;
+        _fullScreenTimer.Stop();
+        _fullScreenTimer.Tick -= FullScreenTimer_OnTick;
+        DisposePlay();
         _viewModel.StateRequested -= ViewModel_OnStateRequested;
         _viewModel.PropertyChanged -= ViewModel_OnPropertyChanged;
         _ambientTimer.Stop();
@@ -400,6 +426,7 @@ public partial class PetWindow : Window
     {
         if (e.NewValue is false)
         {
+            CancelPlay(resumeIdle: false);
             _ambientTimer.Stop();
             _sleepTimer.Stop();
             _companionTimer.Stop();
@@ -410,26 +437,34 @@ public partial class PetWindow : Window
         }
         else
         {
+            if (RefreshFullScreenSuppression()) return;
             UpdateDayPhase();
             _dayPhaseTimer.Start();
             RestartIdleTimers();
             ScheduleNextCompanionMessage();
+            ScheduleNextPlay();
         }
     }
 
     private void SystemEvents_OnDisplaySettingsChanged(object? sender, EventArgs e) =>
         Dispatcher.InvokeAsync(() =>
         {
+            CancelPlay();
             RegisterInteraction();
             EnsureValidPosition();
         });
 
     private void SystemEvents_OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
     {
+        if (e.Mode == PowerModes.Suspend)
+        {
+            Dispatcher.InvokeAsync(() => CancelPlay(resumeIdle: false));
+        }
         if (e.Mode == PowerModes.Resume)
         {
             Dispatcher.InvokeAsync(() =>
             {
+                CancelPlay();
                 RegisterInteraction();
                 EnsureValidPosition();
             });
@@ -438,6 +473,7 @@ public partial class PetWindow : Window
 
     private void AmbientTimer_OnTick(object? sender, EventArgs e)
     {
+        if (RefreshFullScreenSuppression()) return;
         if (!IsVisible)
         {
             _ambientTimer.Stop();
@@ -461,6 +497,7 @@ public partial class PetWindow : Window
     private void SleepTimer_OnTick(object? sender, EventArgs e)
     {
         _sleepTimer.Stop();
+        if (RefreshFullScreenSuppression()) return;
         if (!IsVisible)
         {
             return;
@@ -480,6 +517,7 @@ public partial class PetWindow : Window
     private void CompanionTimer_OnTick(object? sender, EventArgs e)
     {
         _companionTimer.Stop();
+        if (RefreshFullScreenSuppression()) return;
         if (!IsVisible)
         {
             ScheduleNextCompanionMessage();
@@ -488,15 +526,15 @@ public partial class PetWindow : Window
 
         if (IsPetInteractionInProgress() ||
             _viewModel.IsBubbleOpen ||
-            UserActivityHelper.GetSystemIdleTime() > PetExperienceConfig.MaximumSystemIdleForCompanion)
+            UserActivityHelper.GetSystemIdleTime() > LocalConfig.Current.Experience.MaximumSystemIdleForCompanion)
         {
-            _companionTimer.Interval = PetExperienceConfig.CompanionBlockedRetryDelay;
+            _companionTimer.Interval = LocalConfig.Current.Experience.CompanionBlockedRetryDelay;
             _companionTimer.Start();
             return;
         }
 
         var now = DateTime.Now;
-        var reply = PetExperienceConfig.GetCompanionReply(
+        var reply = LocalConfig.Current.Experience.GetCompanionReply(
             _random,
             now,
             _settingsService.Current.UserTitle,
@@ -507,7 +545,7 @@ public partial class PetWindow : Window
             _hasShownCompanionMessage = true;
             _lastCompanionReply = reply;
             _sleepTimer.Stop();
-            _sleepTimer.Interval = PetExperienceConfig.SleepIdleDelay;
+            _sleepTimer.Interval = LocalConfig.Current.Experience.SleepIdleDelay;
             _sleepTimer.Start();
             _stateController.SetState(PetState.Idle);
         }
@@ -517,12 +555,16 @@ public partial class PetWindow : Window
 
     private async void DayPhaseTimer_OnTick(object? sender, EventArgs e)
     {
+        if (RefreshFullScreenSuppression()) return;
         UpdateDayPhase();
         await _viewModel.CheckCelebrationAsync();
     }
 
     private void RegisterInteraction()
     {
+        if (_isFullScreenSuppressed) return;
+        _playIdleSince = Environment.TickCount64;
+        if (_play.IsActive) return;
         if (_stateController.CurrentState is PetState.Sleeping)
         {
             _stateController.SetState(PetState.Idle);
@@ -537,9 +579,9 @@ public partial class PetWindow : Window
     private void RestartAmbientTimer()
     {
         _ambientTimer.Stop();
-        if (IsLoaded && IsVisible)
+        if (IsLoaded && IsVisible && !_play.IsActive && !_isFullScreenSuppressed)
         {
-            _ambientTimer.Interval = PetExperienceConfig.AmbientIdleDelay;
+            _ambientTimer.Interval = LocalConfig.Current.Experience.AmbientIdleDelay;
             _ambientTimer.Start();
         }
     }
@@ -548,9 +590,9 @@ public partial class PetWindow : Window
     {
         RestartAmbientTimer();
         _sleepTimer.Stop();
-        if (IsLoaded && IsVisible)
+        if (IsLoaded && IsVisible && !_play.IsActive && !_isFullScreenSuppressed)
         {
-            _sleepTimer.Interval = PetExperienceConfig.SleepIdleDelay;
+            _sleepTimer.Interval = LocalConfig.Current.Experience.SleepIdleDelay;
             _sleepTimer.Start();
         }
     }
@@ -558,12 +600,12 @@ public partial class PetWindow : Window
     private void ScheduleNextCompanionMessage()
     {
         _companionTimer.Stop();
-        if (!IsLoaded || !IsVisible)
+        if (!IsLoaded || !IsVisible || _play.IsActive || _isFullScreenSuppressed)
         {
             return;
         }
 
-        _companionTimer.Interval = PetExperienceConfig.GetNextCompanionDelay(
+        _companionTimer.Interval = LocalConfig.Current.Experience.GetNextCompanionDelay(
             _random,
             DateTime.Now,
             isFirst: !_hasShownCompanionMessage);
@@ -571,6 +613,7 @@ public partial class PetWindow : Window
     }
 
     private bool IsPetInteractionInProgress() =>
+        _play.IsActive ||
         _viewModel.IsBusy ||
         _viewModel.IsInputOpen ||
         _isPointerDown ||
@@ -580,7 +623,7 @@ public partial class PetWindow : Window
         _inputWindow?.IsMouseOver == true;
 
     private void UpdateDayPhase() =>
-        PetArtwork.ApplyDayPhase(PetExperienceConfig.GetDayPhase(DateTime.Now));
+        PetArtwork.ApplyDayPhase(LocalConfig.Current.Experience.GetDayPhase(DateTime.Now));
 
     private async void EnsureValidPosition()
     {

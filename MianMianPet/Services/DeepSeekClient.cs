@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using MianMianPet.Configuration;
 using MianMianPet.Models;
 
 namespace MianMianPet.Services;
@@ -27,9 +28,9 @@ public sealed class DeepSeekClient
         IReadOnlyList<ChatMessage> messages,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (!InternalAiConfig.IsConfigured)
+        if (!LocalConfig.Current.Ai.IsConfigured)
         {
-            throw new InvalidOperationException("内置 AI 服务尚未完成配置。 ");
+            throw new InvalidOperationException("请在本机 config.json 中填写 ai.apiKey 后重启。");
         }
 
         var settings = _settingsService.Current;
@@ -49,16 +50,16 @@ public sealed class DeepSeekClient
         {
             using var request = new HttpRequestMessage(
                 HttpMethod.Post,
-                BuildEndpoint(InternalAiConfig.BaseUrl, "chat/completions"));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", InternalAiConfig.ApiKey);
+                BuildEndpoint(LocalConfig.Current.Ai.BaseUrl, "chat/completions"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", LocalConfig.Current.Ai.ApiKey);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
             var body = new
             {
-                model = InternalAiConfig.Model,
+                model = LocalConfig.Current.Ai.Model,
                 messages = apiMessages,
                 stream = true,
-                max_tokens = InternalAiConfig.MaxTokens,
-                temperature = InternalAiConfig.Temperature,
+                max_tokens = LocalConfig.Current.Ai.MaxTokens,
+                temperature = LocalConfig.Current.Ai.Temperature,
                 thinking = new { type = "disabled" }
             };
             request.Content = new StringContent(
@@ -170,7 +171,7 @@ public sealed class DeepSeekClient
     {
         var message = response.StatusCode switch
         {
-            HttpStatusCode.Unauthorized => "内置 AI 服务验证失败，请联系构建者检查配置。",
+            HttpStatusCode.Unauthorized => "AI 服务验证失败，请检查本机 config.json 的 ai 配置。",
             HttpStatusCode.PaymentRequired => "API 余额不足，请充值后再试。",
             HttpStatusCode.TooManyRequests => "今天有点挤，稍后再来找我吧。",
             HttpStatusCode.InternalServerError or HttpStatusCode.ServiceUnavailable =>

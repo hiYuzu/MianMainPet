@@ -1,4 +1,5 @@
 using System.Windows;
+using MianMianPet.Configuration;
 using MianMianPet.Infrastructure;
 using MianMianPet.Models;
 using MianMianPet.Services;
@@ -36,6 +37,7 @@ public partial class App : Application
         {
             var paths = new AppPaths();
             var logService = new LogService(paths);
+            await LocalConfig.LoadAsync(paths, logService);
             _settingsService = new SettingsService(paths, logService);
             await _settingsService.LoadAsync();
             _startupService = new StartupService();
@@ -43,14 +45,9 @@ public partial class App : Application
             await database.InitializeAsync();
             _conversationService = new ConversationService(database);
 
-            await using var promptStream = typeof(App).Assembly.GetManifestResourceStream(
-                "MianMianPet.Resources.persona-prompt.txt")
-                ?? throw new InvalidOperationException("内置人设提示词资源缺失。 ");
-            using var promptReader = new StreamReader(promptStream);
-            var prompt = await promptReader.ReadToEndAsync();
-            var persona = new PetPersona(prompt);
+            var persona = new PetPersona(LocalConfig.Current.PersonaPrompt);
             _httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("MianMianPet/2.0.5");
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("MianMianPet/2.1.2");
             var deepSeekClient = new DeepSeekClient(_httpClient, _settingsService, persona);
             _petViewModel = new PetViewModel(
                 deepSeekClient,

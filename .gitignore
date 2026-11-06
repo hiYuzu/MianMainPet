@@ -10,6 +10,8 @@ TestResults/
 *.binlog
 
 # Local app settings and chat history
+config.json
+celebrations.json
 settings.json
 settings.json.tmp
 mianmian.db

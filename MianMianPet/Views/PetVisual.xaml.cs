@@ -4,6 +4,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using MianMianPet.Animation;
 using MianMianPet.Configuration;
+using MianMianPet.Models;
 
 namespace MianMianPet.Views;
 
@@ -12,14 +13,56 @@ public partial class PetVisual : UserControl
     private Storyboard? _activeStateStoryboard;
     private Storyboard? _ambientLoopStoryboard;
     private bool _isAmbientSceneVisible;
+    private bool _animationsSuspended;
+    private PetState _state;
+    private Storyboard? _breathingStoryboard;
+    private Storyboard? _twinkleStoryboard;
+    private Storyboard? _reactionStoryboard;
 
     public PetVisual()
     {
         InitializeComponent();
+        IsVisibleChanged += (_, _) => RefreshAnimations();
+    }
+
+    internal void SetAnimationsSuspended(bool suspended)
+    {
+        _animationsSuspended = suspended;
+        RefreshAnimations();
+    }
+
+    private void RefreshAnimations()
+    {
+        if (IsVisible && !_animationsSuspended)
+        {
+            if (_breathingStoryboard is not null) return;
+            _breathingStoryboard = ((Storyboard)Resources["BreathingStoryboard"]).Clone();
+            _twinkleStoryboard = ((Storyboard)Resources["TimeOfDayTwinkleStoryboard"]).Clone();
+            _breathingStoryboard.Begin(this, HandoffBehavior.SnapshotAndReplace, true);
+            _twinkleStoryboard.Begin(this, HandoffBehavior.SnapshotAndReplace, true);
+            ApplyState(_state);
+            return;
+        }
+
+        _breathingStoryboard?.Remove(this);
+        _twinkleStoryboard?.Remove(this);
+        _activeStateStoryboard?.Remove(this);
+        _ambientLoopStoryboard?.Remove(this);
+        _reactionStoryboard?.Remove(this);
+        _breathingStoryboard = _twinkleStoryboard = _activeStateStoryboard = _ambientLoopStoryboard = _reactionStoryboard = null;
+        _isAmbientSceneVisible = false;
+        PetRotate.BeginAnimation(RotateTransform.AngleProperty, null);
+        GrassScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        foreach (var target in new UIElement[] { AmbientScene, AmbientSparkleOverlay, TimeOfDayAtmosphere, SunDecoration, MoonDecoration })
+            target.BeginAnimation(OpacityProperty, null);
+        AmbientScene.Opacity = AmbientSparkleOverlay.Opacity = 0;
+        SetBlink(false);
     }
 
     public void ApplyState(PetState state)
     {
+        _state = state;
+        if (_animationsSuspended || !IsVisible) return;
         _activeStateStoryboard?.Remove(this);
         _activeStateStoryboard = null;
         TalkMouth.Visibility = Visibility.Collapsed;
@@ -72,6 +115,14 @@ public partial class PetVisual : UserControl
 
     public void PlayWake() => PlayReaction("WakeStoryboard");
 
+    internal void SetTreasure(WalkTreasure? treasure)
+    {
+        TreasureAdornment.Visibility = treasure is null ? Visibility.Collapsed : Visibility.Visible;
+        TreasureAdornment.Data = treasure is null ? null : Geometry.Parse(treasure.Shape);
+        if (treasure is not null)
+            TreasureAdornment.Fill = (Brush)new BrushConverter().ConvertFromString(treasure.Color)!;
+    }
+
     public void SetBlink(bool closed)
     {
         OpenEyes.Visibility = closed ? Visibility.Collapsed : Visibility.Visible;
@@ -80,6 +131,7 @@ public partial class PetVisual : UserControl
 
     public void SetAmbientSceneVisible(bool visible)
     {
+        if (_animationsSuspended || !IsVisible) return;
         if (_isAmbientSceneVisible == visible)
         {
             return;
@@ -128,6 +180,7 @@ public partial class PetVisual : UserControl
 
     internal void ApplyDayPhase(PetDayPhase phase)
     {
+        if (_animationsSuspended || !IsVisible) return;
         var (center, edge, atmosphereOpacity, sunOpacity, moonOpacity) = phase switch
         {
             PetDayPhase.Dawn =>
@@ -154,8 +207,10 @@ public partial class PetVisual : UserControl
 
     private void PlayReaction(string key)
     {
-        var storyboard = ((Storyboard)Resources[key]).Clone();
-        storyboard.Begin(this, HandoffBehavior.Compose, true);
+        if (_animationsSuspended || !IsVisible) return;
+        _reactionStoryboard?.Remove(this);
+        _reactionStoryboard = ((Storyboard)Resources[key]).Clone();
+        _reactionStoryboard.Begin(this, HandoffBehavior.Compose, true);
     }
 
     private static void AnimateOpacity(UIElement target, double opacity, int durationMilliseconds)

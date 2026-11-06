@@ -1,3 +1,4 @@
+using MianMianPet.Configuration;
 using MianMianPet.Infrastructure;
 
 namespace MianMianPet.Services;
@@ -43,8 +44,8 @@ public sealed class LogService
         const string bearer = "Bearer ";
         var index = singleLine.IndexOf(bearer, StringComparison.OrdinalIgnoreCase);
         var sanitized = index < 0 ? singleLine : singleLine[..index] + "Bearer [REDACTED]";
-        return InternalAiConfig.IsConfigured
-            ? sanitized.Replace(InternalAiConfig.ApiKey, "[REDACTED]", StringComparison.Ordinal)
+        return LocalConfig.Current.Ai.IsConfigured
+            ? sanitized.Replace(LocalConfig.Current.Ai.ApiKey, "[REDACTED]", StringComparison.Ordinal)
             : sanitized;
     }
 }

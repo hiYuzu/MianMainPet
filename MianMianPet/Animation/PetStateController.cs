@@ -9,6 +9,8 @@ public sealed class PetStateController : IDisposable
     private readonly DispatcherTimer _blinkTimer;
     private readonly DispatcherTimer _pettingTimer;
     private readonly Random _random = new();
+    private bool _suspended;
+    private bool _disposed;
 
     public PetStateController(PetVisual visual)
     {
@@ -34,21 +36,39 @@ public sealed class PetStateController : IDisposable
 
         CurrentState = state;
         _pettingTimer.Stop();
+        if (_suspended) return;
         _visual.ApplyState(state);
         if (state is PetState.Petted) _pettingTimer.Start();
     }
 
-    public void PlayClickReaction() => _visual.PlayClick();
+    public void PlayClickReaction() { if (!_suspended) _visual.PlayClick(); }
 
-    public void PlayWakeReaction() => _visual.PlayWake();
+    public void PlayWakeReaction() { if (!_suspended) _visual.PlayWake(); }
+
+    internal void SetSuspended(bool suspended)
+    {
+        _suspended = suspended;
+        _blinkTimer.Stop();
+        _pettingTimer.Stop();
+        _visual.SetAnimationsSuspended(suspended);
+        if (!suspended && !_disposed)
+        {
+            CurrentState = PetState.Idle;
+            _visual.ApplyState(CurrentState);
+            _blinkTimer.Interval = NextBlinkInterval();
+            _blinkTimer.Start();
+        }
+    }
 
     private async void BlinkTimerOnTick(object? sender, EventArgs e)
     {
         _blinkTimer.Stop();
+        if (_suspended || _disposed) return;
         if (CurrentState is PetState.Idle or PetState.Hovered or PetState.Listening)
         {
             _visual.SetBlink(true);
             await Task.Delay(_random.Next(100, 155));
+            if (_suspended || _disposed) return;
             if (CurrentState is PetState.Idle or PetState.Hovered or PetState.Listening)
             {
                 _visual.SetBlink(false);
@@ -63,6 +83,7 @@ public sealed class PetStateController : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         _blinkTimer.Stop();
         _pettingTimer.Stop();
     }

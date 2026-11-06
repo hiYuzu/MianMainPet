@@ -31,7 +31,8 @@ public sealed class PetViewModel : ObservableObject, IDisposable
     private Celebration? _pendingCelebration;
     private bool _checkingCelebration;
     private bool _openingGift;
-    private int _bubbleAutoHideSeconds = InternalAiConfig.BubbleAutoHideSeconds;
+    private bool _presentationSuppressed;
+    private int _bubbleAutoHideSeconds = LocalConfig.Current.Ai.BubbleAutoHideSeconds;
 
     public PetViewModel(
         DeepSeekClient deepSeekClient,
@@ -98,7 +99,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isInputOpen, value)) RefreshGiftVisibility();
         }
     }
-    public bool IsBubbleOpen { get => _isBubbleOpen; private set => SetProperty(ref _isBubbleOpen, value); }
+    public bool IsBubbleOpen { get => _isBubbleOpen; private set => SetProperty(ref _isBubbleOpen, value && !_presentationSuppressed); }
     public bool IsBusy
     {
         get => _isBusy;
@@ -121,7 +122,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isThinking, value)) OnPropertyChanged(nameof(BubbleWidth));
         }
     }
-    public bool HasGift => _pendingCelebration is not null && !IsBusy && !IsInputOpen && !_openingGift;
+    public bool HasGift => _pendingCelebration is not null && !IsBusy && !IsInputOpen && !_openingGift && !_presentationSuppressed;
     public AsyncRelayCommand OpenGiftCommand { get; }
     public bool IsHoverHintVisible { get => _isHoverHintVisible; set => SetProperty(ref _isHoverHintVisible, value); }
     public AsyncRelayCommand SendCommand { get; }
@@ -139,7 +140,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
 
     public async Task CheckCelebrationAsync()
     {
-        if (_checkingCelebration || _openingGift) return;
+        if (_checkingCelebration || _openingGift || _presentationSuppressed) return;
         _checkingCelebration = true;
         try
         {
@@ -174,7 +175,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         {
             gift = await _celebrationService.GetPendingAsync(DateTime.Now.Date);
             if (gift is null) return;
-            if (IsBusy || IsInputOpen)
+            if (IsBusy || IsInputOpen || _presentationSuppressed)
             {
                 _pendingCelebration = gift;
                 return;
@@ -209,7 +210,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
 
     public void ToggleInput()
     {
-        if (IsBusy)
+        if (IsBusy || _presentationSuppressed)
         {
             return;
         }
@@ -259,7 +260,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
 
     public bool TryShowCompanionMessage(string message)
     {
-        if (IsBusy || IsInputOpen || IsBubbleOpen || string.IsNullOrWhiteSpace(message))
+        if (_presentationSuppressed || IsBusy || IsInputOpen || IsBubbleOpen || string.IsNullOrWhiteSpace(message))
         {
             return false;
         }
@@ -268,8 +269,22 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         IsThinking = false;
         BubbleText = message;
         IsBubbleOpen = true;
-        ScheduleBubbleAutoHide(PetExperienceConfig.CompanionBubbleAutoHideSeconds);
+        ScheduleBubbleAutoHide(LocalConfig.Current.Experience.CompanionBubbleAutoHideSeconds);
         return true;
+    }
+
+    internal void SetPresentationSuppressed(bool suppressed)
+    {
+        _presentationSuppressed = suppressed;
+        if (suppressed)
+        {
+            _bubbleTimer.Stop();
+            _isBubbleHovered = false;
+            IsBubbleOpen = false;
+            IsHoverHintVisible = false;
+            HideInput();
+        }
+        RefreshGiftVisibility();
     }
 
     public void NotifySettingsChanged()
@@ -291,15 +306,15 @@ public sealed class PetViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!InternalAiConfig.IsConfigured)
+        if (!LocalConfig.Current.Ai.IsConfigured)
         {
-            BubbleText = PickFailureReply(PetExperienceConfig.ServiceFailureReplies);
+            BubbleText = PickFailureReply(LocalConfig.Current.Experience.ServiceFailureReplies);
             IsBubbleOpen = true;
             IsInputOpen = false;
             StateRequested?.Invoke(this, PetState.Error);
             await Task.Delay(550);
             StateRequested?.Invoke(this, PetState.Idle);
-            ScheduleBubbleAutoHide(PetExperienceConfig.FailureBubbleAutoHideSeconds);
+            ScheduleBubbleAutoHide(LocalConfig.Current.Experience.FailureBubbleAutoHideSeconds);
             return;
         }
 
@@ -311,7 +326,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         try
         {
             _bubbleTimer.Stop();
-            _requestCancellation = new CancellationTokenSource(PetExperienceConfig.AiRequestTimeout);
+            _requestCancellation = new CancellationTokenSource(LocalConfig.Current.Experience.AiRequestTimeout);
             IsBusy = true;
             IsThinking = true;
             IsHoverHintVisible = false;
@@ -362,12 +377,12 @@ public sealed class PetViewModel : ObservableObject, IDisposable
                     MessageStatus.Failed);
             }
 
-            BubbleText = PickFailureReply(PetExperienceConfig.TimeoutFailureReplies);
+            BubbleText = PickFailureReply(LocalConfig.Current.Experience.TimeoutFailureReplies);
             await _logService.InfoAsync("chat_timed_out");
             StateRequested?.Invoke(this, PetState.Error);
             await Task.Delay(550);
             StateRequested?.Invoke(this, PetState.Idle);
-            ScheduleBubbleAutoHide(PetExperienceConfig.FailureBubbleAutoHideSeconds);
+            ScheduleBubbleAutoHide(LocalConfig.Current.Experience.FailureBubbleAutoHideSeconds);
         }
 
         catch (Exception ex)
@@ -390,7 +405,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
             StateRequested?.Invoke(this, PetState.Error);
             await Task.Delay(550);
             StateRequested?.Invoke(this, PetState.Idle);
-            ScheduleBubbleAutoHide(PetExperienceConfig.FailureBubbleAutoHideSeconds);
+            ScheduleBubbleAutoHide(LocalConfig.Current.Experience.FailureBubbleAutoHideSeconds);
         }
         finally
         {
@@ -404,10 +419,10 @@ public sealed class PetViewModel : ObservableObject, IDisposable
 
     private string GetFriendlyMessage(Exception exception) => exception switch
     {
-        DeepSeekApiException => PickFailureReply(PetExperienceConfig.ServiceFailureReplies),
-        HttpRequestException => PickFailureReply(PetExperienceConfig.NetworkFailureReplies),
-        TaskCanceledException => PickFailureReply(PetExperienceConfig.TimeoutFailureReplies),
-        _ => PickFailureReply(PetExperienceConfig.GeneralFailureReplies)
+        DeepSeekApiException => PickFailureReply(LocalConfig.Current.Experience.ServiceFailureReplies),
+        HttpRequestException => PickFailureReply(LocalConfig.Current.Experience.NetworkFailureReplies),
+        TaskCanceledException => PickFailureReply(LocalConfig.Current.Experience.TimeoutFailureReplies),
+        _ => PickFailureReply(LocalConfig.Current.Experience.GeneralFailureReplies)
     };
 
     private string PickFailureReply(IReadOnlyList<string> replies) =>
@@ -436,7 +451,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         _pendingText.Clear();
     }
 
-    private void ScheduleBubbleAutoHide(int seconds = InternalAiConfig.BubbleAutoHideSeconds)
+    private void ScheduleBubbleAutoHide(int seconds)
     {
         _bubbleTimer.Stop();
         _bubbleAutoHideSeconds = seconds;
@@ -456,7 +471,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
     {
         BubbleText = GetFriendlyMessage(exception);
         IsBubbleOpen = true;
-        ScheduleBubbleAutoHide(PetExperienceConfig.FailureBubbleAutoHideSeconds);
+        ScheduleBubbleAutoHide(LocalConfig.Current.Experience.FailureBubbleAutoHideSeconds);
     }
 
     public void Dispose()

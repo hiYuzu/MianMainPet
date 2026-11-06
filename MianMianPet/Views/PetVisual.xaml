@@ -294,6 +294,13 @@
                 </Canvas>
                 </Canvas>
             </Viewbox>
+            <Viewbox IsHitTestVisible="False">
+                <Canvas Width="170" Height="170">
+                    <Path x:Name="TreasureAdornment" Canvas.Left="78" Canvas.Top="43"
+                          Width="29" Height="29" Stretch="Uniform" Visibility="Collapsed"
+                          Stroke="#BE92A1" StrokeThickness="1.3" StrokeLineJoin="Round" />
+                </Canvas>
+            </Viewbox>
         </Grid>
 
         <!-- Sparkles are intentionally above the opaque sheep artwork so they stay visible. -->
@@ -348,10 +355,4 @@
         </Viewbox>
     </Grid>
 
-    <UserControl.Triggers>
-        <EventTrigger RoutedEvent="Loaded">
-            <BeginStoryboard Storyboard="{StaticResource BreathingStoryboard}" />
-            <BeginStoryboard Storyboard="{StaticResource TimeOfDayTwinkleStoryboard}" />
-        </EventTrigger>
-    </UserControl.Triggers>
 </UserControl>

@@ -10,6 +10,7 @@
         AllowsTransparency="True"
         Background="Transparent"
         ShowInTaskbar="False"
+        ShowActivated="False"
         Topmost="True"
         Opacity="0"
         UseLayoutRounding="True"
@@ -89,6 +90,12 @@
                               MouseEnter="Bubble_OnMouseEnter"
                               MouseLeave="Bubble_OnMouseLeave"
                               SizeChanged="Bubble_OnSizeChanged" />
+        </Popup>
+
+        <Popup x:Name="PlayPopup" PlacementTarget="{Binding ElementName=PetRoot}"
+               AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="True"
+               Opened="PlayPopup_OnOpened">
+            <local:PetPlayPanel x:Name="PlayPanel" />
         </Popup>
     </Grid>
 </Window>
