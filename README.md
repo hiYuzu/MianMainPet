@@ -19,10 +19,6 @@ internal const string ApiKey = "PASTE_YOUR_VERIFIED_DEEPSEEK_API_KEY_HERE";
 
 将其换成 DeepSeek API Key。Base URL、模型、输出长度、温度和上下文窗口集中在同一个内部配置类中。AI 默认回复 1～3 句话，输出上限为 480 token，最多带入最近 16 条成功消息（约 8 轮），并受 12,000 字符上下文预算限制。触及输出上限时自动接完一次，整次回复共用 2 分钟超时。
 
-> 桌面程序中的内置 API Key 无法真正保密。请仅向自己或可信任对象分发包含真实 Key 的构建，不要将源代码或二进制公开发布。公开分发前应改用自建后端代理。
-
-当前交付包没有包含真实 API Key，因为此前源码和需求附件均未提供该密钥；除此之外不需要首次运行配置。
-
 ## 内置体验配置
 
 主动陪伴、闲置睡眠、昼夜分段和人设化失败回复集中在：
@@ -31,17 +27,11 @@ internal const string ApiKey = "PASTE_YOUR_VERIFIED_DEEPSEEK_API_KEY_HERE";
 MianMianPet\Configuration\PetExperienceConfig.cs
 ```
 
-昼夜效果会根据电脑本地时间自动切换，不需要用户设置。
-
-鼠标在羊头和上半身轻轻来回移动，会触发闭眼、蹭蹭和耳朵轻摆，偶尔飘出一颗心。单击小羊打开聊天，按住拖动调整位置。
-
-回复云朵按内容使用 200～370 DIP 宽度，正常回复完成后按长度停留 4～20 秒，悬停暂停计时。内容超过屏幕可用高度时可在云朵内滚动阅读。
-
 ## 配置生日与纪念日
 
-首次启动 v2.0.5 后，会在 `%LOCALAPPDATA%\MianMianPet\celebrations.json` 生成配置。通常对应 `C:\Users\你的用户名\AppData\Local\MianMianPet\celebrations.json`。用记事本打开，以 UTF-8 保存即可。程序在启动时及运行期间每分钟读取一次，修改后最多约一分钟生效。
+首次启动后，会在 `%LOCALAPPDATA%\MianMianPet\celebrations.json` 生成配置。通常对应 `C:\Users\你的用户名\AppData\Local\MianMianPet\celebrations.json`。程序在启动时及运行期间每分钟读取一次，修改后最多约一分钟生效。
 
-默认配置为 `[]`，所有日期和文案由你自行填写。下面用元旦和中秋节演示格式，可以按需要增删项目、修改日期和替换祝福。
+默认配置为 `[]`，所有日期和文案自行填写。下面用元旦和中秋节演示格式，可以按需要增删项目、修改日期和替换祝福。
 
 ```json
 [
@@ -96,6 +86,6 @@ dotnet run --project .\MianMianPet\MianMianPet.csproj
 .\publish.ps1
 ```
 
-输出位于 `publish\win-x64`，使用 self-contained x64 单文件发布。未启用裁剪，避免影响 WPF XAML 和 SQLite 运行时行为。
+输出位于 `publish\win-x64`，使用 self-contained x64 单文件发布。。
 
 版本变化见 `CHANGELOG.md`。
