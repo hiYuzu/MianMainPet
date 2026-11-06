@@ -1,0 +1,17 @@
+bin/
+obj/
+.vs/
+.vscode/
+publish/
+*.user
+*.suo
+*.log
+TestResults/
+*.binlog
+
+# Local app settings and chat history
+settings.json
+settings.json.tmp
+mianmian.db
+mianmian.db-*
+mianmian-corrupt-*.db*

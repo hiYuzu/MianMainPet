@@ -1,0 +1,164 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using MianMianPet.Animation;
+using MianMianPet.Configuration;
+
+namespace MianMianPet.Views;
+
+public partial class PetVisual : UserControl
+{
+    private Storyboard? _activeStateStoryboard;
+    private Storyboard? _ambientLoopStoryboard;
+    private bool _isAmbientSceneVisible;
+
+    public PetVisual()
+    {
+        InitializeComponent();
+    }
+
+    public void ApplyState(PetState state)
+    {
+        _activeStateStoryboard?.Remove(this);
+        _activeStateStoryboard = null;
+        TalkMouth.Visibility = Visibility.Collapsed;
+        WorriedMouth.Visibility = Visibility.Collapsed;
+        IdleMouth.Visibility = Visibility.Visible;
+        SleepZOverlay.Visibility = Visibility.Collapsed;
+        if (state is not PetState.Sleeping)
+        {
+            SetBlink(false);
+        }
+
+        switch (state)
+        {
+            case PetState.Hovered:
+                PetRotate.BeginAnimation(System.Windows.Media.RotateTransform.AngleProperty,
+                    new DoubleAnimation(-2, TimeSpan.FromMilliseconds(180)));
+                break;
+            case PetState.Thinking:
+                StartStateStoryboard("ThinkingStoryboard");
+                break;
+            case PetState.Speaking:
+                IdleMouth.Visibility = Visibility.Collapsed;
+                TalkMouth.Visibility = Visibility.Visible;
+                StartStateStoryboard("SpeakingStoryboard");
+                break;
+            case PetState.Error:
+                IdleMouth.Visibility = Visibility.Collapsed;
+                WorriedMouth.Visibility = Visibility.Visible;
+                StartStateStoryboard("ErrorStoryboard");
+                break;
+            case PetState.Sleeping:
+                SetBlink(true);
+                SleepZOverlay.Visibility = Visibility.Visible;
+                StartStateStoryboard("SleepingStoryboard");
+                break;
+            default:
+                PetRotate.BeginAnimation(System.Windows.Media.RotateTransform.AngleProperty,
+                    new DoubleAnimation(0, TimeSpan.FromMilliseconds(160)));
+                break;
+        }
+    }
+
+    public void PlayClick() => PlayReaction("ClickStoryboard");
+
+    public void PlayWake() => PlayReaction("WakeStoryboard");
+
+    public void SetBlink(bool closed)
+    {
+        OpenEyes.Visibility = closed ? Visibility.Collapsed : Visibility.Visible;
+        ClosedEyes.Visibility = closed ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    public void SetAmbientSceneVisible(bool visible)
+    {
+        if (_isAmbientSceneVisible == visible)
+        {
+            return;
+        }
+
+        _isAmbientSceneVisible = visible;
+        if (visible)
+        {
+            _ambientLoopStoryboard?.Remove(this);
+            _ambientLoopStoryboard = ((Storyboard)Resources["AmbientLoopStoryboard"]).Clone();
+            _ambientLoopStoryboard.Begin(this, HandoffBehavior.SnapshotAndReplace, true);
+        }
+
+        var fade = new DoubleAnimation
+        {
+            To = visible ? 1 : 0,
+            Duration = TimeSpan.FromMilliseconds(visible ? 1350 : 320),
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+        };
+        fade.Completed += (_, _) =>
+        {
+            if (!_isAmbientSceneVisible)
+            {
+                _ambientLoopStoryboard?.Remove(this);
+                _ambientLoopStoryboard = null;
+            }
+        };
+        AmbientScene.BeginAnimation(OpacityProperty, fade);
+
+        var sparkleFade = new DoubleAnimation
+        {
+            To = visible ? 1 : 0,
+            Duration = TimeSpan.FromMilliseconds(visible ? 720 : 180),
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+        };
+        AmbientSparkleOverlay.BeginAnimation(OpacityProperty, sparkleFade);
+
+        var grass = new DoubleAnimation
+        {
+            To = visible ? 1 : 0.72,
+            Duration = TimeSpan.FromMilliseconds(visible ? 1500 : 300),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        GrassScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleYProperty, grass);
+    }
+
+    internal void ApplyDayPhase(PetDayPhase phase)
+    {
+        var (center, edge, atmosphereOpacity, sunOpacity, moonOpacity) = phase switch
+        {
+            PetDayPhase.Dawn =>
+                (Color.FromArgb(0x62, 0xFF, 0xD2, 0x9B), Color.FromArgb(0x00, 0xFF, 0xF3, 0xE5), 0.38, 0.68, 0.0),
+            PetDayPhase.Day =>
+                (Color.FromArgb(0x45, 0xFF, 0xEE, 0xBD), Color.FromArgb(0x00, 0xFF, 0xFA, 0xEE), 0.25, 0.34, 0.0),
+            PetDayPhase.Dusk =>
+                (Color.FromArgb(0x68, 0xFF, 0xAD, 0x8F), Color.FromArgb(0x00, 0xA7, 0x85, 0xC8), 0.43, 0.48, 0.0),
+            _ =>
+                (Color.FromArgb(0x62, 0x68, 0x64, 0xA8), Color.FromArgb(0x00, 0x35, 0x32, 0x61), 0.46, 0.0, 0.92)
+        };
+
+        DayPhaseGlow.Fill = new RadialGradientBrush(center, edge);
+        AnimateOpacity(TimeOfDayAtmosphere, atmosphereOpacity, 900);
+        AnimateOpacity(SunDecoration, sunOpacity, 700);
+        AnimateOpacity(MoonDecoration, moonOpacity, 700);
+    }
+
+    private void StartStateStoryboard(string key)
+    {
+        _activeStateStoryboard = (Storyboard)Resources[key];
+        _activeStateStoryboard.Begin(this, HandoffBehavior.Compose, true);
+    }
+
+    private void PlayReaction(string key)
+    {
+        var storyboard = ((Storyboard)Resources[key]).Clone();
+        storyboard.Begin(this, HandoffBehavior.Compose, true);
+    }
+
+    private static void AnimateOpacity(UIElement target, double opacity, int durationMilliseconds)
+    {
+        target.BeginAnimation(OpacityProperty, new DoubleAnimation
+        {
+            To = opacity,
+            Duration = TimeSpan.FromMilliseconds(durationMilliseconds),
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+        });
+    }
+}

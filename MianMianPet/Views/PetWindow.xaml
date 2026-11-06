@@ -1,0 +1,71 @@
+<Window x:Class="MianMianPet.Views.PetWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MianMianPet.Views"
+        Title="{Binding PetName, StringFormat={}{0} AI 桌宠}"
+        Icon="/MianMianPet;component/Resources/Images/MianMianPet.ico"
+        Width="150" Height="150"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Opacity="0"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        Loaded="Window_OnLoaded"
+        PreviewMouseDown="Window_OnPreviewMouseDown"
+        IsVisibleChanged="Window_OnIsVisibleChanged"
+        Closing="Window_OnClosing">
+    <Grid x:Name="PetRoot">
+        <Border x:Name="PetHitArea"
+                Background="#01000000"
+                CornerRadius="70"
+                Margin="9"
+                Cursor="Hand"
+                MouseLeftButtonDown="Pet_OnMouseLeftButtonDown"
+                MouseMove="Pet_OnMouseMove"
+                MouseLeftButtonUp="Pet_OnMouseLeftButtonUp"
+                MouseEnter="Pet_OnMouseEnter"
+                MouseLeave="Pet_OnMouseLeave">
+            <Border.ContextMenu>
+                <ContextMenu Background="#FFF9F7" BorderBrush="#EFD8DB" Padding="4">
+                    <ContextMenu.Resources>
+                        <Style TargetType="MenuItem">
+                            <Setter Property="Padding" Value="13,8" />
+                            <Setter Property="Foreground" Value="#4B433D" />
+                        </Style>
+                    </ContextMenu.Resources>
+                    <MenuItem Header="设置" Click="SettingsMenuItem_OnClick" />
+                    <MenuItem Header="退出" Click="ExitMenuItem_OnClick" />
+                </ContextMenu>
+            </Border.ContextMenu>
+            <Viewbox Stretch="Uniform">
+                <local:PetVisual x:Name="PetArtwork" />
+            </Viewbox>
+        </Border>
+
+        <Border HorizontalAlignment="Center" VerticalAlignment="Top"
+                Margin="0,4,0,0" Padding="10,5"
+                CornerRadius="12" Background="#EFFFF9F0"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                IsHitTestVisible="False"
+                Visibility="{Binding IsHoverHintVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <TextBlock Text="和我说说话" FontSize="12" />
+        </Border>
+
+        <Popup x:Name="BubblePopup"
+               PlacementTarget="{Binding ElementName=PetRoot}"
+               AllowsTransparency="True"
+               PopupAnimation="Fade"
+               StaysOpen="True"
+               IsOpen="{Binding IsBubbleOpen, Mode=OneWay}"
+               Opened="BubblePopup_OnOpened">
+            <local:ChatBubble x:Name="BubbleControl"
+                              MouseEnter="Bubble_OnMouseEnter"
+                              MouseLeave="Bubble_OnMouseLeave"
+                              SizeChanged="Bubble_OnSizeChanged" />
+        </Popup>
+    </Grid>
+</Window>

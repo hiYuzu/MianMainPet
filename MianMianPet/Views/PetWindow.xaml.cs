@@ -1,0 +1,562 @@
+using System.ComponentModel;
+using System.Globalization;
+using System.Windows;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
+using Microsoft.Win32;
+using MianMianPet.Animation;
+using MianMianPet.Configuration;
+using MianMianPet.Infrastructure;
+using MianMianPet.Services;
+using MianMianPet.ViewModels;
+
+namespace MianMianPet.Views;
+
+public partial class PetWindow : Window
+{
+    private readonly PetViewModel _viewModel;
+    private readonly DatabaseService _database;
+    private readonly SettingsService _settingsService;
+    private readonly LogService _logService;
+    private readonly Action _showSettings;
+    private readonly Action _exitApplication;
+    private readonly PetStateController _stateController;
+    private readonly DispatcherTimer _ambientTimer;
+    private readonly DispatcherTimer _sleepTimer;
+    private readonly DispatcherTimer _companionTimer;
+    private readonly DispatcherTimer _dayPhaseTimer;
+    private readonly Random _random = new();
+    private InputWindow? _inputWindow;
+    private Point _dragStartScreen;
+    private Point _dragStartWindow;
+    private bool _isPointerDown;
+    private bool _didDrag;
+    private bool _allowClose;
+    private bool _hasShownCompanionMessage;
+    private string? _lastCompanionReply;
+
+    public PetWindow(
+        PetViewModel viewModel,
+        DatabaseService database,
+        SettingsService settingsService,
+        LogService logService,
+        Action showSettings,
+        Action exitApplication)
+    {
+        InitializeComponent();
+        _viewModel = viewModel;
+        _database = database;
+        _settingsService = settingsService;
+        _logService = logService;
+        _showSettings = showSettings;
+        _exitApplication = exitApplication;
+        DataContext = viewModel;
+        _stateController = new PetStateController(PetArtwork);
+        _ambientTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = PetExperienceConfig.AmbientIdleDelay
+        };
+        _ambientTimer.Tick += AmbientTimer_OnTick;
+        _sleepTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = PetExperienceConfig.SleepIdleDelay
+        };
+        _sleepTimer.Tick += SleepTimer_OnTick;
+        _companionTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
+        _companionTimer.Tick += CompanionTimer_OnTick;
+        _dayPhaseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = PetExperienceConfig.DayPhaseRefreshInterval
+        };
+        _dayPhaseTimer.Tick += DayPhaseTimer_OnTick;
+        _viewModel.FocusInputRequested += ViewModel_OnFocusInputRequested;
+        _viewModel.StateRequested += ViewModel_OnStateRequested;
+        _viewModel.PropertyChanged += ViewModel_OnPropertyChanged;
+        SystemEvents.DisplaySettingsChanged += SystemEvents_OnDisplaySettingsChanged;
+        SystemEvents.PowerModeChanged += SystemEvents_OnPowerModeChanged;
+    }
+
+    public void ApplySettings()
+    {
+        Topmost = _settingsService.Current.AlwaysOnTop;
+        if (_inputWindow is not null)
+        {
+            _inputWindow.Topmost = Topmost;
+        }
+        const double fixedPetSize = 150d;
+        Width = fixedPetSize;
+        Height = fixedPetSize;
+        if (!double.IsNaN(Left) && !double.IsNaN(Top))
+        {
+            var clamped = ScreenPlacementHelper.ClampPetPosition(this, Left, Top);
+            Left = clamped.X;
+            Top = clamped.Y;
+        }
+    }
+
+    public void AllowClose() => _allowClose = true;
+
+    public void RegisterExternalInteraction() => RegisterInteraction();
+
+    private async void Window_OnLoaded(object sender, RoutedEventArgs e)
+    {
+        if (_inputWindow is null)
+        {
+            _inputWindow = new InputWindow(_viewModel)
+            {
+                Owner = this,
+                Topmost = Topmost
+            };
+            _inputWindow.SizeChanged += (_, _) => PositionInputWindow();
+        }
+
+        ApplySettings();
+        try
+        {
+            var leftText = await _database.GetStateAsync("pet.left");
+            var topText = await _database.GetStateAsync("pet.top");
+            if (double.TryParse(leftText, NumberStyles.Float, CultureInfo.InvariantCulture, out var left) &&
+                double.TryParse(topText, NumberStyles.Float, CultureInfo.InvariantCulture, out var top))
+            {
+                var position = ScreenPlacementHelper.ClampPetPosition(this, left, top);
+                Left = position.X;
+                Top = position.Y;
+            }
+            else
+            {
+                SetDefaultPosition();
+            }
+        }
+        catch (Exception ex)
+        {
+            await _logService.ErrorAsync("pet_position_load_failed", ex);
+            SetDefaultPosition();
+        }
+
+        UpdateDayPhase();
+        _dayPhaseTimer.Start();
+        RestartIdleTimers();
+        ScheduleNextCompanionMessage();
+        Opacity = 1;
+    }
+
+    private void Window_OnPreviewMouseDown(object sender, MouseButtonEventArgs e) => RegisterInteraction();
+
+    private void Pet_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _isPointerDown = true;
+        _didDrag = false;
+        _dragStartScreen = PointToScreen(e.GetPosition(this));
+        _dragStartWindow = new Point(Left, Top);
+        PetHitArea.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void Pet_OnMouseMove(object sender, MouseEventArgs e)
+    {
+        RegisterInteraction();
+        if (!_isPointerDown || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var current = PointToScreen(e.GetPosition(this));
+        var deltaPixels = current - _dragStartScreen;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var delta = new Vector(deltaPixels.X / dpi.DpiScaleX, deltaPixels.Y / dpi.DpiScaleY);
+        if (!_didDrag && Math.Abs(delta.X) + Math.Abs(delta.Y) < 5)
+        {
+            return;
+        }
+
+        _didDrag = true;
+        _viewModel.HideInput();
+        Left = _dragStartWindow.X + delta.X;
+        Top = _dragStartWindow.Y + delta.Y;
+        PositionInputWindow();
+    }
+
+    private async void Pet_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isPointerDown)
+        {
+            return;
+        }
+
+        _isPointerDown = false;
+        PetHitArea.ReleaseMouseCapture();
+        if (_didDrag)
+        {
+            var clamped = ScreenPlacementHelper.ClampPetPosition(this, Left, Top);
+            Left = clamped.X;
+            Top = clamped.Y;
+            PositionInputWindow();
+            await SavePositionSafelyAsync();
+            _stateController.SetState(PetState.Idle);
+        }
+        else
+        {
+            _stateController.PlayClickReaction();
+            _viewModel.ToggleInput();
+        }
+
+        e.Handled = true;
+    }
+
+    private void Pet_OnMouseEnter(object sender, MouseEventArgs e)
+    {
+        RegisterInteraction();
+        if (!_viewModel.IsBusy && !_isPointerDown && !_viewModel.IsInputOpen)
+        {
+            _viewModel.IsHoverHintVisible = true;
+            _stateController.SetState(PetState.Hovered);
+        }
+    }
+
+    private void Pet_OnMouseLeave(object sender, MouseEventArgs e)
+    {
+        _viewModel.IsHoverHintVisible = false;
+        if (!_viewModel.IsBusy && !_isPointerDown && !_viewModel.IsInputOpen)
+        {
+            _stateController.SetState(PetState.Idle);
+        }
+    }
+
+    private void BubblePopup_OnOpened(object? sender, EventArgs e) => PlaceBubblePopup();
+
+    private void Bubble_OnSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (BubblePopup.IsOpen)
+        {
+            PlaceBubblePopup();
+        }
+    }
+
+    private void PlaceBubblePopup()
+    {
+        var workArea = ScreenPlacementHelper.GetWorkingAreaSize(this);
+        var maximumHeight = Math.Max(120, workArea.Height - 24);
+        BubbleControl.SetMaximumHeight(maximumHeight);
+        var width = BubbleControl.ActualWidth > 0 ? BubbleControl.ActualWidth : 370;
+        var height = Math.Clamp(BubbleControl.ActualHeight, 80, maximumHeight);
+        ScreenPlacementHelper.PlacePopup(this, BubblePopup, width, height);
+    }
+
+    private void Bubble_OnMouseEnter(object sender, MouseEventArgs e)
+    {
+        RegisterInteraction();
+        _viewModel.PauseBubbleAutoHide();
+    }
+
+    private void Bubble_OnMouseLeave(object sender, MouseEventArgs e)
+    {
+        RegisterInteraction();
+        _viewModel.ResumeBubbleAutoHide();
+    }
+
+    private void ViewModel_OnFocusInputRequested(object? sender, EventArgs e)
+    {
+        RegisterInteraction();
+        ShowInputWindow();
+    }
+
+    private void ViewModel_OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(PetViewModel.InputText) or
+            nameof(PetViewModel.IsInputOpen) or
+            nameof(PetViewModel.IsBusy))
+        {
+            RegisterInteraction();
+        }
+
+        if (e.PropertyName != nameof(PetViewModel.IsInputOpen))
+        {
+            return;
+        }
+
+        if (_viewModel.IsInputOpen)
+        {
+            ShowInputWindow();
+        }
+        else
+        {
+            _inputWindow?.Hide();
+        }
+    }
+
+    private void ShowInputWindow()
+    {
+        if (_inputWindow is null)
+        {
+            return;
+        }
+
+        _inputWindow.Topmost = Topmost;
+        PositionInputWindow();
+        _inputWindow.ActivateInput();
+        PositionInputWindow();
+    }
+
+    private void PositionInputWindow()
+    {
+        if (_inputWindow is not null && _viewModel.IsInputOpen)
+        {
+            ScreenPlacementHelper.PlaceFloatingWindow(this, _inputWindow);
+        }
+    }
+
+    private void ViewModel_OnStateRequested(object? sender, PetState state) =>
+        _stateController.SetState(state);
+
+    private async Task SavePositionAsync()
+    {
+        await _database.SetStateAsync("pet.left", Left.ToString(CultureInfo.InvariantCulture));
+        await _database.SetStateAsync("pet.top", Top.ToString(CultureInfo.InvariantCulture));
+    }
+
+    private void SettingsMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        RegisterInteraction();
+        _showSettings();
+    }
+    private void ExitMenuItem_OnClick(object sender, RoutedEventArgs e) => _exitApplication();
+
+    private void Window_OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (!_allowClose)
+        {
+            e.Cancel = true;
+            Hide();
+            return;
+        }
+
+        _viewModel.FocusInputRequested -= ViewModel_OnFocusInputRequested;
+        _viewModel.StateRequested -= ViewModel_OnStateRequested;
+        _viewModel.PropertyChanged -= ViewModel_OnPropertyChanged;
+        _ambientTimer.Stop();
+        _ambientTimer.Tick -= AmbientTimer_OnTick;
+        _sleepTimer.Stop();
+        _sleepTimer.Tick -= SleepTimer_OnTick;
+        _companionTimer.Stop();
+        _companionTimer.Tick -= CompanionTimer_OnTick;
+        _dayPhaseTimer.Stop();
+        _dayPhaseTimer.Tick -= DayPhaseTimer_OnTick;
+        _inputWindow?.AllowClose();
+        _inputWindow?.Close();
+        _inputWindow = null;
+        SystemEvents.DisplaySettingsChanged -= SystemEvents_OnDisplaySettingsChanged;
+        SystemEvents.PowerModeChanged -= SystemEvents_OnPowerModeChanged;
+        _stateController.Dispose();
+    }
+
+    private void Window_OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is false)
+        {
+            _ambientTimer.Stop();
+            _sleepTimer.Stop();
+            _companionTimer.Stop();
+            _dayPhaseTimer.Stop();
+            PetArtwork.SetAmbientSceneVisible(false);
+            _viewModel.HideInput();
+            _inputWindow?.Hide();
+        }
+        else
+        {
+            UpdateDayPhase();
+            _dayPhaseTimer.Start();
+            RestartIdleTimers();
+            ScheduleNextCompanionMessage();
+        }
+    }
+
+    private void SystemEvents_OnDisplaySettingsChanged(object? sender, EventArgs e) =>
+        Dispatcher.InvokeAsync(() =>
+        {
+            RegisterInteraction();
+            EnsureValidPosition();
+        });
+
+    private void SystemEvents_OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume)
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                RegisterInteraction();
+                EnsureValidPosition();
+            });
+        }
+    }
+
+    private void AmbientTimer_OnTick(object? sender, EventArgs e)
+    {
+        if (!IsVisible)
+        {
+            _ambientTimer.Stop();
+            return;
+        }
+
+        if (_viewModel.IsBusy ||
+            _viewModel.IsInputOpen ||
+            PetHitArea.IsMouseOver ||
+            BubbleControl.IsMouseOver ||
+            _inputWindow?.IsMouseOver == true)
+        {
+            RestartAmbientTimer();
+            return;
+        }
+
+        _ambientTimer.Stop();
+        PetArtwork.SetAmbientSceneVisible(true);
+    }
+
+    private void SleepTimer_OnTick(object? sender, EventArgs e)
+    {
+        _sleepTimer.Stop();
+        if (!IsVisible)
+        {
+            return;
+        }
+
+        if (IsPetInteractionInProgress())
+        {
+            _sleepTimer.Interval = TimeSpan.FromSeconds(15);
+            _sleepTimer.Start();
+            return;
+        }
+
+        PetArtwork.SetAmbientSceneVisible(true);
+        _stateController.SetState(PetState.Sleeping);
+    }
+
+    private void CompanionTimer_OnTick(object? sender, EventArgs e)
+    {
+        _companionTimer.Stop();
+        if (!IsVisible)
+        {
+            ScheduleNextCompanionMessage();
+            return;
+        }
+
+        if (IsPetInteractionInProgress() ||
+            _viewModel.IsBubbleOpen ||
+            UserActivityHelper.GetSystemIdleTime() > PetExperienceConfig.MaximumSystemIdleForCompanion)
+        {
+            _companionTimer.Interval = PetExperienceConfig.CompanionBlockedRetryDelay;
+            _companionTimer.Start();
+            return;
+        }
+
+        var now = DateTime.Now;
+        var reply = PetExperienceConfig.GetCompanionReply(
+            _random,
+            now,
+            _settingsService.Current.UserTitle,
+            _settingsService.Current.PetName,
+            _lastCompanionReply);
+        if (_viewModel.TryShowCompanionMessage(reply))
+        {
+            _hasShownCompanionMessage = true;
+            _lastCompanionReply = reply;
+            _sleepTimer.Stop();
+            _sleepTimer.Interval = PetExperienceConfig.SleepIdleDelay;
+            _sleepTimer.Start();
+            _stateController.SetState(PetState.Idle);
+        }
+
+        ScheduleNextCompanionMessage();
+    }
+
+    private void DayPhaseTimer_OnTick(object? sender, EventArgs e) => UpdateDayPhase();
+
+    private void RegisterInteraction()
+    {
+        if (_stateController.CurrentState is PetState.Sleeping)
+        {
+            _stateController.SetState(PetState.Idle);
+            _stateController.PlayWakeReaction();
+        }
+
+        PetArtwork.SetAmbientSceneVisible(false);
+        RestartIdleTimers();
+        ScheduleNextCompanionMessage();
+    }
+
+    private void RestartAmbientTimer()
+    {
+        _ambientTimer.Stop();
+        if (IsLoaded && IsVisible)
+        {
+            _ambientTimer.Interval = PetExperienceConfig.AmbientIdleDelay;
+            _ambientTimer.Start();
+        }
+    }
+
+    private void RestartIdleTimers()
+    {
+        RestartAmbientTimer();
+        _sleepTimer.Stop();
+        if (IsLoaded && IsVisible)
+        {
+            _sleepTimer.Interval = PetExperienceConfig.SleepIdleDelay;
+            _sleepTimer.Start();
+        }
+    }
+
+    private void ScheduleNextCompanionMessage()
+    {
+        _companionTimer.Stop();
+        if (!IsLoaded || !IsVisible)
+        {
+            return;
+        }
+
+        _companionTimer.Interval = PetExperienceConfig.GetNextCompanionDelay(
+            _random,
+            DateTime.Now,
+            isFirst: !_hasShownCompanionMessage);
+        _companionTimer.Start();
+    }
+
+    private bool IsPetInteractionInProgress() =>
+        _viewModel.IsBusy ||
+        _viewModel.IsInputOpen ||
+        _isPointerDown ||
+        Application.Current.Windows.OfType<SettingsWindow>().Any(window => window.IsVisible) ||
+        PetHitArea.IsMouseOver ||
+        BubbleControl.IsMouseOver ||
+        _inputWindow?.IsMouseOver == true;
+
+    private void UpdateDayPhase() =>
+        PetArtwork.ApplyDayPhase(PetExperienceConfig.GetDayPhase(DateTime.Now));
+
+    private async void EnsureValidPosition()
+    {
+        var clamped = ScreenPlacementHelper.ClampPetPosition(this, Left, Top);
+        Left = clamped.X;
+        Top = clamped.Y;
+        PositionInputWindow();
+        await SavePositionSafelyAsync();
+    }
+
+    private void SetDefaultPosition()
+    {
+        var position = ScreenPlacementHelper.GetDefaultPetPosition(this);
+        Left = position.X;
+        Top = position.Y;
+    }
+
+    private async Task SavePositionSafelyAsync()
+    {
+        try
+        {
+            await SavePositionAsync();
+        }
+        catch (Exception ex)
+        {
+            await _logService.ErrorAsync("pet_position_save_failed", ex);
+        }
+    }
+}

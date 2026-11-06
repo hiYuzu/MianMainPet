@@ -1,0 +1,152 @@
+<UserControl x:Class="MianMianPet.Views.InputPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Width="340"
+             PreviewKeyDown="OnPreviewKeyDown">
+    <Grid x:Name="CloudRoot"
+          Margin="8,8,8,14"
+          RenderTransformOrigin="0.5,0.78">
+        <Grid.RenderTransform>
+            <ScaleTransform ScaleX="1" ScaleY="1" />
+        </Grid.RenderTransform>
+
+        <!-- The shadow is isolated from the content so text stays crisp. -->
+        <Grid x:Name="CloudSilhouette" IsHitTestVisible="False">
+            <Grid.Effect>
+                <DropShadowEffect Color="#604B433D"
+                                  BlurRadius="17"
+                                  ShadowDepth="4"
+                                  Opacity="0.22" />
+            </Grid.Effect>
+
+            <Canvas Height="58" VerticalAlignment="Top">
+                <Ellipse Canvas.Left="9" Canvas.Top="20" Width="66" Height="42"
+                         Fill="#FFFFFCF8" Stroke="#E7D7D9" StrokeThickness="1" />
+                <Ellipse Canvas.Left="48" Canvas.Top="8" Width="82" Height="58"
+                         Fill="#FFFFFCF8" Stroke="#E7D7D9" StrokeThickness="1" />
+                <Ellipse Canvas.Left="108" Canvas.Top="1" Width="91" Height="68"
+                         Fill="#FFFFFCF8" Stroke="#E7D7D9" StrokeThickness="1" />
+                <Ellipse Canvas.Left="178" Canvas.Top="9" Width="82" Height="57"
+                         Fill="#FFFFFCF8" Stroke="#E7D7D9" StrokeThickness="1" />
+                <Ellipse Canvas.Left="244" Canvas.Top="21" Width="70" Height="42"
+                         Fill="#FFFFFCF8" Stroke="#E7D7D9" StrokeThickness="1" />
+            </Canvas>
+
+            <Border Margin="0,31,0,13"
+                    Background="#FFFFFCF8"
+                    BorderBrush="#E7D7D9"
+                    BorderThickness="1,0,1,1"
+                    CornerRadius="29" />
+
+            <Ellipse Width="15" Height="11"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Bottom"
+                     Margin="18,0,0,4"
+                     Fill="#FFFFFCF8"
+                     Stroke="#E7D7D9"
+                     StrokeThickness="1" />
+            <Ellipse Width="8" Height="8"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Bottom"
+                     Margin="38,0,0,-3"
+                     Fill="#FFFFFCF8"
+                     Stroke="#E7D7D9"
+                     StrokeThickness="1" />
+        </Grid>
+
+        <Border x:Name="PanelBorder"
+                Margin="0,31,0,13"
+                Padding="17,17,14,13"
+                Background="Transparent"
+                RenderTransformOrigin="0.5,1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Border Margin="0,1,0,0"
+                        Padding="5,0"
+                        Background="#4DFFFFFF"
+                        CornerRadius="15">
+                    <Grid>
+                        <TextBox x:Name="MessageInput"
+                                 Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
+                                 MaxLength="2000"
+                                 MinHeight="32"
+                                 MaxHeight="98"
+                                 Padding="2,5"
+                                 VerticalScrollBarVisibility="Auto"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 InputMethod.IsInputMethodEnabled="True"
+                                 InputMethod.IsInputMethodSuspended="False"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 Foreground="{StaticResource TextBrush}"
+                                 FontFamily="Microsoft YaHei UI"
+                                 FontSize="14"
+                                 ToolTip="Enter 发送，Shift+Enter 换行，Esc 收起" />
+                        <TextBlock x:Name="PlaceholderText"
+                                   Text="{Binding InputPlaceholder}"
+                                   Margin="4,7,0,0"
+                                   VerticalAlignment="Top"
+                                   Foreground="#8A817A"
+                                   IsHitTestVisible="False" />
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Column="1" Margin="9,0,0,0" VerticalAlignment="Bottom">
+                    <Button Width="38" Height="38"
+                            Style="{StaticResource CreamButton}"
+                            Background="#F4E6DF"
+                            BorderBrush="#E7C9CF"
+                            Padding="0"
+                            Command="{Binding SendCommand}"
+                            Visibility="{Binding IsBusy, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                        <Path Width="17" Height="17" Stretch="Uniform"
+                              Fill="{StaticResource AccentBrush}"
+                              Data="M2,10 L18,2 L13,18 L9.5,11.5 Z M9.5,11.5 L18,2" />
+                    </Button>
+                    <Button Width="38" Height="38"
+                            Style="{StaticResource CreamButton}"
+                            Background="#F4E6DF"
+                            BorderBrush="#E7C9CF"
+                            Padding="0"
+                            Command="{Binding CancelCommand}"
+                            Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}"
+                            ToolTip="停止回复">
+                        <Rectangle Width="12" Height="12" RadiusX="2" RadiusY="2"
+                                   Fill="{StaticResource ErrorBrush}" />
+                    </Button>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+
+    <UserControl.Triggers>
+        <EventTrigger RoutedEvent="Loaded">
+            <BeginStoryboard>
+                <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="CloudRoot"
+                                     Storyboard.TargetProperty="Opacity"
+                                     From="0" To="1" Duration="0:0:0.22" />
+                    <DoubleAnimation Storyboard.TargetName="CloudRoot"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                     From="0.93" To="1" Duration="0:0:0.22">
+                        <DoubleAnimation.EasingFunction>
+                            <BackEase EasingMode="EaseOut" Amplitude="0.2" />
+                        </DoubleAnimation.EasingFunction>
+                    </DoubleAnimation>
+                    <DoubleAnimation Storyboard.TargetName="CloudRoot"
+                                     Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                     From="0.93" To="1" Duration="0:0:0.22">
+                        <DoubleAnimation.EasingFunction>
+                            <BackEase EasingMode="EaseOut" Amplitude="0.2" />
+                        </DoubleAnimation.EasingFunction>
+                    </DoubleAnimation>
+                </Storyboard>
+            </BeginStoryboard>
+        </EventTrigger>
+    </UserControl.Triggers>
+</UserControl>
