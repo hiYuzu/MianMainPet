@@ -7,11 +7,14 @@ public sealed class PetStateController : IDisposable
 {
     private readonly PetVisual _visual;
     private readonly DispatcherTimer _blinkTimer;
+    private readonly DispatcherTimer _pettingTimer;
     private readonly Random _random = new();
 
     public PetStateController(PetVisual visual)
     {
         _visual = visual;
+        _pettingTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+        _pettingTimer.Tick += (_, _) => SetState(PetState.Idle);
         _blinkTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = NextBlinkInterval()
@@ -30,7 +33,9 @@ public sealed class PetStateController : IDisposable
         }
 
         CurrentState = state;
+        _pettingTimer.Stop();
         _visual.ApplyState(state);
+        if (state is PetState.Petted) _pettingTimer.Start();
     }
 
     public void PlayClickReaction() => _visual.PlayClick();
@@ -56,5 +61,9 @@ public sealed class PetStateController : IDisposable
 
     private TimeSpan NextBlinkInterval() => TimeSpan.FromSeconds(_random.NextDouble() * 5 + 4);
 
-    public void Dispose() => _blinkTimer.Stop();
+    public void Dispose()
+    {
+        _blinkTimer.Stop();
+        _pettingTimer.Stop();
+    }
 }

@@ -33,6 +33,12 @@ public sealed class ConversationService
             totalCharacters += message.Content.Length;
         }
 
+        // Keep the context boundary on a complete exchange, including older stored conversations.
+        while (selected.First is { Value.Role: "assistant" })
+        {
+            selected.RemoveFirst();
+        }
+
         selected.AddLast(currentUserMessage);
         return selected.ToList();
     }

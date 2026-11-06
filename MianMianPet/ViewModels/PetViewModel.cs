@@ -14,6 +14,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
     private readonly ConversationService _conversationService;
     private readonly SettingsService _settingsService;
     private readonly LogService _logService;
+    private readonly CelebrationService _celebrationService;
     private readonly DispatcherTimer _flushTimer;
     private readonly DispatcherTimer _bubbleTimer;
     private readonly StringBuilder _pendingText = new();
@@ -27,21 +28,25 @@ public sealed class PetViewModel : ObservableObject, IDisposable
     private bool _isThinking;
     private bool _isHoverHintVisible;
     private bool _isBubbleHovered;
-    private bool _cancelRequested;
+    private Celebration? _pendingCelebration;
+    private bool _checkingCelebration;
+    private bool _openingGift;
     private int _bubbleAutoHideSeconds = InternalAiConfig.BubbleAutoHideSeconds;
 
     public PetViewModel(
         DeepSeekClient deepSeekClient,
         ConversationService conversationService,
         SettingsService settingsService,
-        LogService logService)
+        LogService logService,
+        CelebrationService celebrationService)
     {
         _deepSeekClient = deepSeekClient;
         _conversationService = conversationService;
         _settingsService = settingsService;
         _logService = logService;
+        _celebrationService = celebrationService;
+        OpenGiftCommand = new AsyncRelayCommand(OpenGiftAsync, () => HasGift, OnCommandError);
         SendCommand = new AsyncRelayCommand(SendAsync, CanSend, OnCommandError);
-        CancelCommand = new RelayCommand(Cancel, () => IsBusy);
         ToggleInputCommand = new RelayCommand(ToggleInput, () => !IsBusy);
         HideInputCommand = new RelayCommand(HideInput);
         _flushTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(40), DispatcherPriority.Background, FlushPendingText, Dispatcher.CurrentDispatcher);
@@ -68,8 +73,31 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string BubbleText { get => _bubbleText; private set => SetProperty(ref _bubbleText, value); }
-    public bool IsInputOpen { get => _isInputOpen; private set => SetProperty(ref _isInputOpen, value); }
+    public string BubbleText
+    {
+        get => _bubbleText;
+        private set
+        {
+            if (SetProperty(ref _bubbleText, value)) OnPropertyChanged(nameof(BubbleWidth));
+        }
+    }
+    public double BubbleWidth
+    {
+        get
+        {
+            if (IsThinking) return 200;
+            if (BubbleText.Length <= 18) return 230;
+            return BubbleText.Length <= 60 ? 300 : 370;
+        }
+    }
+    public bool IsInputOpen
+    {
+        get => _isInputOpen;
+        private set
+        {
+            if (SetProperty(ref _isInputOpen, value)) RefreshGiftVisibility();
+        }
+    }
     public bool IsBubbleOpen { get => _isBubbleOpen; private set => SetProperty(ref _isBubbleOpen, value); }
     public bool IsBusy
     {
@@ -79,16 +107,24 @@ public sealed class PetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isBusy, value))
             {
                 SendCommand.RaiseCanExecuteChanged();
-                CancelCommand.RaiseCanExecuteChanged();
                 ToggleInputCommand.RaiseCanExecuteChanged();
+                RefreshGiftVisibility();
             }
         }
     }
 
-    public bool IsThinking { get => _isThinking; private set => SetProperty(ref _isThinking, value); }
+    public bool IsThinking
+    {
+        get => _isThinking;
+        private set
+        {
+            if (SetProperty(ref _isThinking, value)) OnPropertyChanged(nameof(BubbleWidth));
+        }
+    }
+    public bool HasGift => _pendingCelebration is not null && !IsBusy && !IsInputOpen && !_openingGift;
+    public AsyncRelayCommand OpenGiftCommand { get; }
     public bool IsHoverHintVisible { get => _isHoverHintVisible; set => SetProperty(ref _isHoverHintVisible, value); }
     public AsyncRelayCommand SendCommand { get; }
-    public RelayCommand CancelCommand { get; }
     public RelayCommand ToggleInputCommand { get; }
     public RelayCommand HideInputCommand { get; }
 
@@ -98,6 +134,77 @@ public sealed class PetViewModel : ObservableObject, IDisposable
     public async Task InitializeAsync()
     {
         BubbleText = await _conversationService.GetLastAssistantReplyAsync() ?? string.Empty;
+        await CheckCelebrationAsync();
+    }
+
+    public async Task CheckCelebrationAsync()
+    {
+        if (_checkingCelebration || _openingGift) return;
+        _checkingCelebration = true;
+        try
+        {
+            var date = DateTime.Now.Date;
+            var pending = await _celebrationService.GetPendingAsync(date);
+            if (!_openingGift && date == DateTime.Now.Date)
+            {
+                _pendingCelebration = pending;
+                RefreshGiftVisibility();
+            }
+        }
+        catch (Exception ex)
+        {
+            _pendingCelebration = null;
+            RefreshGiftVisibility();
+            await _logService.ErrorAsync("celebration_check_failed", ex);
+        }
+        finally
+        {
+            _checkingCelebration = false;
+        }
+    }
+
+    private async Task OpenGiftAsync()
+    {
+        var gift = _pendingCelebration;
+        if (!HasGift || gift is null) return;
+        _openingGift = true;
+        _pendingCelebration = null;
+        RefreshGiftVisibility();
+        try
+        {
+            gift = await _celebrationService.GetPendingAsync(DateTime.Now.Date);
+            if (gift is null) return;
+            if (IsBusy || IsInputOpen)
+            {
+                _pendingCelebration = gift;
+                return;
+            }
+            _bubbleTimer.Stop();
+            IsThinking = false;
+            IsHoverHintVisible = false;
+            BubbleText = gift.Message
+                .Replace("{UserTitle}", _settingsService.Current.UserTitle, StringComparison.Ordinal)
+                .Replace("{PetName}", PetName, StringComparison.Ordinal);
+            IsBubbleOpen = true;
+            StateRequested?.Invoke(this, PetState.Petted);
+            ScheduleBubbleAutoHide(20);
+            await _celebrationService.MarkOpenedAsync(gift);
+        }
+        catch (Exception ex)
+        {
+            await _logService.ErrorAsync("celebration_save_failed", ex);
+        }
+        finally
+        {
+            _openingGift = false;
+            RefreshGiftVisibility();
+        }
+    }
+
+    private void RefreshGiftVisibility()
+    {
+        OnPropertyChanged(nameof(HasGift));
+        OpenGiftCommand.RaiseCanExecuteChanged();
     }
 
     public void ToggleInput()
@@ -108,6 +215,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         }
 
         IsInputOpen = !IsInputOpen;
+        IsHoverHintVisible = false;
         if (IsInputOpen)
         {
             IsBubbleOpen = false;
@@ -120,6 +228,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
             if (!string.IsNullOrWhiteSpace(BubbleText))
             {
                 IsBubbleOpen = true;
+                ScheduleReadingTime();
             }
         }
     }
@@ -202,10 +311,10 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         try
         {
             _bubbleTimer.Stop();
-            _cancelRequested = false;
             _requestCancellation = new CancellationTokenSource(PetExperienceConfig.AiRequestTimeout);
             IsBusy = true;
             IsThinking = true;
+            IsHoverHintVisible = false;
             IsInputOpen = false;
             IsBubbleOpen = true;
             BubbleText = string.Empty;
@@ -240,38 +349,31 @@ public sealed class PetViewModel : ObservableObject, IDisposable
             InputText = string.Empty;
             await _logService.InfoAsync("chat_completed");
             StateRequested?.Invoke(this, PetState.Idle);
-            ScheduleBubbleAutoHide();
+            ScheduleReadingTime();
         }
         catch (OperationCanceledException)
         {
+            IsThinking = false;
             _pendingText.Clear();
             if (requestAttempted && !exchangeSaved)
             {
                 await SaveUnsuccessfulMessageAsync(
                     userMessage,
-                    _cancelRequested ? MessageStatus.Cancelled : MessageStatus.Failed);
+                    MessageStatus.Failed);
             }
 
-            BubbleText = _cancelRequested
-                ? "好呀，绵绵先停下来啦。"
-                : PickFailureReply(PetExperienceConfig.TimeoutFailureReplies);
-            await _logService.InfoAsync(_cancelRequested ? "chat_cancelled" : "chat_timed_out");
-            if (_cancelRequested)
-            {
-                StateRequested?.Invoke(this, PetState.Idle);
-                ScheduleBubbleAutoHide();
-            }
-            else
-            {
-                StateRequested?.Invoke(this, PetState.Error);
-                await Task.Delay(550);
-                StateRequested?.Invoke(this, PetState.Idle);
-                ScheduleBubbleAutoHide(PetExperienceConfig.FailureBubbleAutoHideSeconds);
-            }
+            BubbleText = PickFailureReply(PetExperienceConfig.TimeoutFailureReplies);
+            await _logService.InfoAsync("chat_timed_out");
+            StateRequested?.Invoke(this, PetState.Error);
+            await Task.Delay(550);
+            StateRequested?.Invoke(this, PetState.Idle);
+            ScheduleBubbleAutoHide(PetExperienceConfig.FailureBubbleAutoHideSeconds);
         }
+
         catch (Exception ex)
         {
             _pendingText.Clear();
+            IsThinking = false;
             if (exchangeSaved)
             {
                 await _logService.ErrorAsync("chat_finalize_failed", ex);
@@ -323,12 +425,6 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void Cancel()
-    {
-        _cancelRequested = true;
-        _requestCancellation?.Cancel();
-    }
-
     private void FlushPendingText(object? sender, EventArgs e)
     {
         if (_pendingText.Length == 0)
@@ -352,6 +448,9 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         _bubbleTimer.Interval = TimeSpan.FromSeconds(seconds);
         _bubbleTimer.Start();
     }
+
+    private void ScheduleReadingTime() =>
+        ScheduleBubbleAutoHide(Math.Clamp(2 + BubbleText.Length / 12, 4, 20));
 
     private void OnCommandError(Exception exception)
     {

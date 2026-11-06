@@ -13,9 +13,9 @@ internal static class InternalAiConfig
 
     internal const string BaseUrl = "https://api.deepseek.com";
     internal const string Model = "deepseek-flash";
-    internal const int MaxTokens = 180;
+    internal const int MaxTokens = 480;
     internal const double Temperature = 0.8;
-    internal const int ContextMessageCount = 8;
+    internal const int ContextMessageCount = 16;
     internal const int MaxContextCharacters = 12_000;
     internal const int BubbleAutoHideSeconds = 2;
 

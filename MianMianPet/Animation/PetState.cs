@@ -4,6 +4,7 @@ public enum PetState
 {
     Idle,
     Hovered,
+    Petted,
     Listening,
     Thinking,
     Speaking,

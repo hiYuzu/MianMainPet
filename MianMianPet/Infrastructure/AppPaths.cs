@@ -10,6 +10,7 @@ public sealed class AppPaths
         Logs = Path.Combine(Root, "logs");
         Cache = Path.Combine(Root, "cache");
         SettingsFile = Path.Combine(Root, "settings.json");
+        CelebrationsFile = Path.Combine(Root, "celebrations.json");
         DatabaseFile = Path.Combine(Root, "mianmian.db");
 
         Directory.CreateDirectory(Root);
@@ -21,5 +22,6 @@ public sealed class AppPaths
     public string Logs { get; }
     public string Cache { get; }
     public string SettingsFile { get; }
+    public string CelebrationsFile { get; }
     public string DatabaseFile { get; }
 }

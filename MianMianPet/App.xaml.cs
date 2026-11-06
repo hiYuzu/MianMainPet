@@ -50,13 +50,14 @@ public partial class App : Application
             var prompt = await promptReader.ReadToEndAsync();
             var persona = new PetPersona(prompt);
             _httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("MianMianPet/2.0.4");
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("MianMianPet/2.0.5");
             var deepSeekClient = new DeepSeekClient(_httpClient, _settingsService, persona);
             _petViewModel = new PetViewModel(
                 deepSeekClient,
                 _conversationService,
                 _settingsService,
-                logService);
+                logService,
+                new CelebrationService(database, paths));
             await _petViewModel.InitializeAsync();
             _petWindow = new PetWindow(
                 _petViewModel,

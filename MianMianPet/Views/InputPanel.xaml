@@ -108,17 +108,6 @@
                               Fill="{StaticResource AccentBrush}"
                               Data="M2,10 L18,2 L13,18 L9.5,11.5 Z M9.5,11.5 L18,2" />
                     </Button>
-                    <Button Width="38" Height="38"
-                            Style="{StaticResource CreamButton}"
-                            Background="#F4E6DF"
-                            BorderBrush="#E7C9CF"
-                            Padding="0"
-                            Command="{Binding CancelCommand}"
-                            Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}"
-                            ToolTip="停止回复">
-                        <Rectangle Width="12" Height="12" RadiusX="2" RadiusY="2"
-                                   Fill="{StaticResource ErrorBrush}" />
-                    </Button>
                 </Grid>
             </Grid>
         </Border>

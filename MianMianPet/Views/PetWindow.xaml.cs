@@ -35,6 +35,10 @@ public partial class PetWindow : Window
     private bool _allowClose;
     private bool _hasShownCompanionMessage;
     private string? _lastCompanionReply;
+    private Point? _lastPetPoint;
+    private double _pettingDistance;
+    private long _pettingStartedAt;
+    private long _lastPettingAt;
 
     public PetWindow(
         PetViewModel viewModel,
@@ -145,6 +149,8 @@ public partial class PetWindow : Window
 
     private void Pet_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        _lastPetPoint = null;
+        if (_stateController.CurrentState is PetState.Petted) _stateController.SetState(PetState.Idle);
         _isPointerDown = true;
         _didDrag = false;
         _dragStartScreen = PointToScreen(e.GetPosition(this));
@@ -158,6 +164,7 @@ public partial class PetWindow : Window
         RegisterInteraction();
         if (!_isPointerDown || e.LeftButton != MouseButtonState.Pressed)
         {
+            TrackPetting(e.GetPosition(this));
             return;
         }
 
@@ -193,7 +200,7 @@ public partial class PetWindow : Window
             Top = clamped.Y;
             PositionInputWindow();
             await SavePositionSafelyAsync();
-            _stateController.SetState(PetState.Idle);
+            if (!_viewModel.IsBusy) _stateController.SetState(PetState.Idle);
         }
         else
         {
@@ -216,10 +223,48 @@ public partial class PetWindow : Window
 
     private void Pet_OnMouseLeave(object sender, MouseEventArgs e)
     {
+        _lastPetPoint = null;
         _viewModel.IsHoverHintVisible = false;
-        if (!_viewModel.IsBusy && !_isPointerDown && !_viewModel.IsInputOpen)
+        if (!_viewModel.IsBusy && !_isPointerDown && !_viewModel.IsInputOpen &&
+            _stateController.CurrentState is not PetState.Petted)
         {
             _stateController.SetState(PetState.Idle);
+        }
+    }
+
+    private void TrackPetting(Point point)
+    {
+        var now = Environment.TickCount64;
+        if (_viewModel.IsBusy || _viewModel.IsInputOpen || point.Y > Height * 0.65 ||
+            _stateController.CurrentState is PetState.Petted || now - _lastPettingAt < 3000)
+        {
+            _lastPetPoint = null;
+            return;
+        }
+
+        if (_lastPetPoint is null || now - _pettingStartedAt > 1500)
+        {
+            _pettingDistance = 0;
+            _pettingStartedAt = now;
+            _lastPetPoint = point;
+            return;
+        }
+
+        var distance = (point - _lastPetPoint.Value).Length;
+        _lastPetPoint = point;
+        if (distance > 35)
+        {
+            _lastPetPoint = null;
+            return;
+        }
+
+        _pettingDistance += distance;
+        if (_pettingDistance >= 65 && now - _pettingStartedAt >= 250)
+        {
+            _lastPettingAt = now;
+            _lastPetPoint = null;
+            _viewModel.IsHoverHintVisible = false;
+            _stateController.SetState(PetState.Petted);
         }
     }
 
@@ -236,6 +281,7 @@ public partial class PetWindow : Window
     private void PlaceBubblePopup()
     {
         var workArea = ScreenPlacementHelper.GetWorkingAreaSize(this);
+        BubbleControl.MaxWidth = Math.Max(120, workArea.Width - 24);
         var maximumHeight = Math.Max(120, workArea.Height - 24);
         BubbleControl.SetMaximumHeight(maximumHeight);
         var width = BubbleControl.ActualWidth > 0 ? BubbleControl.ActualWidth : 370;
@@ -469,7 +515,11 @@ public partial class PetWindow : Window
         ScheduleNextCompanionMessage();
     }
 
-    private void DayPhaseTimer_OnTick(object? sender, EventArgs e) => UpdateDayPhase();
+    private async void DayPhaseTimer_OnTick(object? sender, EventArgs e)
+    {
+        UpdateDayPhase();
+        await _viewModel.CheckCelebrationAsync();
+    }
 
     private void RegisterInteraction()
     {

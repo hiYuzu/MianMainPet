@@ -34,12 +34,6 @@ public sealed class DeepSeekClient
 
         var settings = _settingsService.Current;
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Post,
-            BuildEndpoint(InternalAiConfig.BaseUrl, "chat/completions"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", InternalAiConfig.ApiKey);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-
         var apiMessages = new List<object>
         {
             new { role = "system", content = _persona.Render(settings) }
@@ -50,63 +44,91 @@ public sealed class DeepSeekClient
             content = message.Content
         }));
 
-        var body = new
+        var reply = new StringBuilder();
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            model = InternalAiConfig.Model,
-            messages = apiMessages,
-            stream = true,
-            max_tokens = InternalAiConfig.MaxTokens,
-            temperature = InternalAiConfig.Temperature,
-            thinking = new { type = "disabled" }
-        };
-        request.Content = new StringContent(
-            JsonSerializer.Serialize(body),
-            Encoding.UTF8,
-            "application/json");
-
-        using var response = await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw await CreateApiExceptionAsync(response, cancellationToken).ConfigureAwait(false);
-        }
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var reader = new StreamReader(stream);
-        while (true)
-        {
-            var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-            if (line is null)
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                BuildEndpoint(InternalAiConfig.BaseUrl, "chat/completions"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", InternalAiConfig.ApiKey);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+            var body = new
             {
-                yield break;
+                model = InternalAiConfig.Model,
+                messages = apiMessages,
+                stream = true,
+                max_tokens = InternalAiConfig.MaxTokens,
+                temperature = InternalAiConfig.Temperature,
+                thinking = new { type = "disabled" }
+            };
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(body),
+                Encoding.UTF8,
+                "application/json");
+
+            using var response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw await CreateApiExceptionAsync(response, cancellationToken).ConfigureAwait(false);
             }
 
-            if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var reader = new StreamReader(stream);
+            string? finishReason = null;
+            var receivedDone = false;
+            while (true)
             {
-                continue;
+                var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (line is null)
+                {
+                    break;
+                }
+
+                if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var data = line[5..].Trim();
+                if (data == "[DONE]")
+                {
+                    receivedDone = true;
+                    break;
+                }
+
+                if (TryReadContent(data, out var content, out var reason))
+                {
+                    finishReason = reason ?? finishReason;
+                    if (!string.IsNullOrEmpty(content))
+                    {
+                        reply.Append(content);
+                        yield return content;
+                    }
+                }
             }
 
-            var data = line[5..].Trim();
-            if (data == "[DONE]")
+            if (finishReason == "stop" || (receivedDone && finishReason is null)) yield break;
+            if (finishReason != "length" || attempt == 1)
             {
-                yield break;
+                throw new InvalidDataException("AI 回复尚未完整结束。");
             }
 
-            if (TryReadContent(data, out var content) && !string.IsNullOrEmpty(content))
-            {
-                yield return content;
-            }
+            // Continue a capped answer once, within the same request timeout and conversation exchange.
+            apiMessages.Add(new { role = "assistant", content = reply.ToString() });
+            apiMessages.Add(new { role = "user", content = "请紧接着刚才未说完的地方，用一两句把这次回答收好，不要重述已有内容。" });
         }
     }
 
     private static Uri BuildEndpoint(string baseUrl, string relativePath) =>
         new($"{baseUrl.Trim().TrimEnd('/')}/{relativePath}", UriKind.Absolute);
 
-    private static bool TryReadContent(string json, out string? content)
+    private static bool TryReadContent(string json, out string? content, out string? finishReason)
     {
         content = null;
+        finishReason = null;
         try
         {
             using var document = JsonDocument.Parse(json);
@@ -117,10 +139,15 @@ public sealed class DeepSeekClient
                 return false;
             }
 
+            if (choices[0].TryGetProperty("finish_reason", out var reason) && reason.ValueKind == JsonValueKind.String)
+            {
+                finishReason = reason.GetString();
+            }
+
             if (!choices[0].TryGetProperty("delta", out var delta) ||
                 delta.ValueKind != JsonValueKind.Object)
             {
-                return false;
+                return finishReason is not null;
             }
 
             if (delta.TryGetProperty("content", out var value) && value.ValueKind == JsonValueKind.String)
@@ -134,7 +161,7 @@ public sealed class DeepSeekClient
             // Ignore malformed or provider-specific SSE housekeeping lines.
         }
 
-        return false;
+        return finishReason is not null;
     }
 
     private static async Task<DeepSeekApiException> CreateApiExceptionAsync(

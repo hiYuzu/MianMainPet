@@ -26,6 +26,7 @@ public partial class PetVisual : UserControl
         WorriedMouth.Visibility = Visibility.Collapsed;
         IdleMouth.Visibility = Visibility.Visible;
         SleepZOverlay.Visibility = Visibility.Collapsed;
+        PettingHeart.Visibility = Visibility.Collapsed;
         if (state is not PetState.Sleeping)
         {
             SetBlink(false);
@@ -36,6 +37,11 @@ public partial class PetVisual : UserControl
             case PetState.Hovered:
                 PetRotate.BeginAnimation(System.Windows.Media.RotateTransform.AngleProperty,
                     new DoubleAnimation(-2, TimeSpan.FromMilliseconds(180)));
+                break;
+            case PetState.Petted:
+                SetBlink(true);
+                PettingHeart.Visibility = Random.Shared.Next(3) == 0 ? Visibility.Visible : Visibility.Collapsed;
+                StartStateStoryboard("PettingStoryboard");
                 break;
             case PetState.Thinking:
                 StartStateStoryboard("ThinkingStoryboard");
