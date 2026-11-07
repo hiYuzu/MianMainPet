@@ -47,14 +47,15 @@ public sealed class PetStateController : IDisposable
 
     internal void SetSuspended(bool suspended)
     {
+        if (_suspended == suspended || _disposed) return;
         _suspended = suspended;
         _blinkTimer.Stop();
         _pettingTimer.Stop();
         _visual.SetAnimationsSuspended(suspended);
         if (!suspended && !_disposed)
         {
-            CurrentState = PetState.Idle;
             _visual.ApplyState(CurrentState);
+            if (CurrentState is PetState.Petted) _pettingTimer.Start();
             _blinkTimer.Interval = NextBlinkInterval();
             _blinkTimer.Start();
         }

@@ -88,12 +88,17 @@ public sealed class DeepSeekClient
                     break;
                 }
 
+                if (line.StartsWith("event:", StringComparison.OrdinalIgnoreCase) &&
+                    line[6..].Trim().Equals("error", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("AI 服务在流式回复中报告了错误。");
+
                 if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
                 var data = line[5..].Trim();
+                if (data.Length == 0) continue;
                 if (data == "[DONE]")
                 {
                     receivedDone = true;
@@ -133,33 +138,52 @@ public sealed class DeepSeekClient
         try
         {
             using var document = JsonDocument.Parse(json);
-            if (!document.RootElement.TryGetProperty("choices", out var choices) ||
-                choices.ValueKind != JsonValueKind.Array ||
-                choices.GetArrayLength() == 0)
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("AI 流式回复的根节点应为对象。");
+            if (root.TryGetProperty("error", out _))
+                throw new InvalidDataException("AI 服务在流式回复中报告了错误。");
+            if (root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String &&
+                type.GetString() is "ping" or "heartbeat")
+                return false;
+            if (!root.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("AI 流式回复缺少有效的 choices。");
+            if (choices.GetArrayLength() == 0)
             {
+                // Standard usage-only chunks have an empty choices array.
                 return false;
             }
 
-            if (choices[0].TryGetProperty("finish_reason", out var reason) && reason.ValueKind == JsonValueKind.String)
+            if (choices[0].ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("AI 流式回复包含无效的 choice。");
+            if (choices[0].TryGetProperty("finish_reason", out var reason))
             {
-                finishReason = reason.GetString();
+                if (reason.ValueKind == JsonValueKind.String) finishReason = reason.GetString();
+                else if (reason.ValueKind != JsonValueKind.Null)
+                    throw new InvalidDataException("AI 流式回复包含无效的 finish_reason。");
             }
 
-            if (!choices[0].TryGetProperty("delta", out var delta) ||
-                delta.ValueKind != JsonValueKind.Object)
+            if (!choices[0].TryGetProperty("delta", out var delta))
             {
-                return finishReason is not null;
+                if (finishReason is not null) return true;
+                throw new InvalidDataException("AI 流式回复缺少 delta。");
             }
+            if (delta.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("AI 流式回复包含无效的 delta。");
 
-            if (delta.TryGetProperty("content", out var value) && value.ValueKind == JsonValueKind.String)
+            if (delta.TryGetProperty("content", out var value))
             {
+                if (value.ValueKind == JsonValueKind.Null) return finishReason is not null;
+                if (value.ValueKind != JsonValueKind.String)
+                    throw new InvalidDataException("AI 流式回复包含无效的 content。");
                 content = value.GetString();
                 return true;
             }
         }
         catch (JsonException)
         {
-            // Ignore malformed or provider-specific SSE housekeeping lines.
+            // Do not include provider payloads in errors or logs.
+            throw new InvalidDataException("AI 流式回复包含无效 JSON。");
         }
 
         return finishReason is not null;

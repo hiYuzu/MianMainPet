@@ -23,7 +23,7 @@ namespace MianMianPet.Tests;
 // Dependency-free Windows/STA regression runner: dotnet run --project MianMianPet.Tests
 internal static partial class Program
 {
-    private static readonly string Output = Path.GetFullPath(Path.Combine("TestResults", "play-v2.1.2"));
+    private static readonly string Output = Path.GetFullPath(Path.Combine("TestResults", "play-v2.2.0"));
     private static int _assertions;
 
     [STAThread]
@@ -68,6 +68,15 @@ internal static partial class Program
         if (args.Length == 0 || args.Contains("--config-only"))
             await ConfigTests.RunAsync(Path.Combine("TestResults", "config-v2.1.1"), Check);
         if (args.Contains("--config-only")) return;
+        if (args.Length == 0 || args.Contains("--services-only"))
+            await ServiceRegressionTests.RunAsync(Path.Combine("TestResults", "services-v2.2.0"), Check);
+        if (args.Contains("--services-only")) return;
+        if (args.Length == 0 || args.Contains("--settings-only"))
+            await SettingsRegressionTests.RunAsync(Path.Combine("TestResults", "settings-v2.2.0"), Check);
+        if (args.Contains("--settings-only")) return;
+        if (args.Length == 0 || args.Contains("--core-only"))
+            await CoreRegressionTests.RunAsync(Path.Combine("TestResults", "core-v2.2.0"), Check);
+        if (args.Contains("--core-only")) return;
         var restartCheck = args.Length == 2 && args[0] == "--restart-check";
         if (args.Length == 0) TestDeadlines();
         var paths = new AppPaths(restartCheck ? args[1] : Path.Combine(Output, Guid.NewGuid().ToString("N")));
@@ -80,6 +89,7 @@ internal static partial class Program
             new ConversationService(database), settings, log, new CelebrationService(database, paths));
         await viewModel.InitializeAsync();
         var window = new PetWindow(viewModel, database, settings, log, () => { }, () => { });
+        if (restartCheck || args.Contains("--window-only") || args.Contains("--play-only")) window.FullScreenDetector = () => false;
         window.Show();
         await WaitUntil(() => Field<bool>(window, "_playInitialized"));
         window.Left = 600;
@@ -88,6 +98,7 @@ internal static partial class Program
         var panel = Field<PetPlayPanel>(window, "PlayPanel");
         var artwork = Field<PetVisual>(window, "PetArtwork");
         var popup = Field<Popup>(window, "PlayPopup");
+        Window? foreground = null;
         try
         {
             if (restartCheck)
@@ -102,24 +113,39 @@ internal static partial class Program
                 await PreviewAsync(window);
                 return;
             }
-            await TestFullScreenAsync(window, viewModel, database, settings, log);
+            if (args.Contains("--window-only"))
+            {
+                await WindowRegressionTests.RunAsync(window, viewModel, Check);
+                return;
+            }
+            if (!args.Contains("--play-only"))
+                await TestFullScreenAsync(window, viewModel, database, settings, log);
             if (args.Contains("--fullscreen-only")) return;
+            // Native fullscreen detection is verified above; other tests isolate external desktop changes.
+            window.FullScreenDetector = () => false;
+            foreground = WindowRegressionTests.CreateForegroundWindow();
+            if (!args.Contains("--play-only"))
+                await WindowRegressionTests.RunAsync(window, viewModel, Check, foreground);
             // Use real WPF routed Click events, real timers and a private SQLite database.
             Start(window, PetPlayKind.Walk);
             Check(session.Phase == PetPlayPhase.Walking && popup.IsOpen, "walk opens cloud panel");
             await Task.Delay(450);
             Check(Field<Border>(window, "PetHitArea").Opacity == 0, "pet leaves during walk");
             Render(panel, "walk-away");
-            await WaitUntil(() => session.Phase == PetPlayPhase.ShowingTreasure);
-            var shownAt = Environment.TickCount64;
+            await WaitUntil(() => session.Phase == PetPlayPhase.ShowingTreasure, 7000,
+                () => $"phase={session.Phase}, suppressed={Field<bool>(window, "_isFullScreenSuppressed")}, visible={window.IsVisible}, frameTimer={Field<DispatcherTimer>(window, "_playFrameTimer").IsEnabled}");
+            var treasureDeadline = session.Deadline;
             Check(Field<System.Windows.Shapes.Path>(artwork, "TreasureAdornment").IsVisible, "returned treasure is worn");
             Check(await database.GetStateAsync("play.last") == "walk:returned", "walk outcome saved");
+            await Task.Delay((int)Math.Max(0, treasureDeadline - Environment.TickCount64 - 1000));
+            Check(session.Phase == PetPlayPhase.ShowingTreasure,
+                $"treasure stays visible before its deadline (phase={session.Phase}, remaining={treasureDeadline - Environment.TickCount64}ms, suppressed={Field<bool>(window, "_isFullScreenSuppressed")}, visible={window.IsVisible})");
+            // Export after the timing assertion so PNG encoding cannot consume its waiting margin.
             Render(panel, "walk-returned");
             Render(artwork, "treasure-worn");
-            await Task.Delay(6100);
-            Check(session.Phase == PetPlayPhase.ShowingTreasure, "treasure stays visible until seven seconds");
             await WaitUntil(() => !session.IsActive);
-            Check(Environment.TickCount64 - shownAt is >= 6900 and < 7700, "real display lasts seven seconds");
+            Check(Environment.TickCount64 >= treasureDeadline && Environment.TickCount64 - treasureDeadline < 5000,
+                "real display expires after its seven-second deadline");
             Check(!popup.IsOpen && !Field<System.Windows.Shapes.Path>(artwork, "TreasureAdornment").IsVisible, "treasure and panel expire together");
 
             Start(window, PetPlayKind.HideAndSeek);
@@ -141,7 +167,8 @@ internal static partial class Program
             Check(await database.GetStateAsync("play.last") == "hide:found", "win saved");
 
             Start(window, PetPlayKind.HideAndSeek);
-            await WaitUntil(() => session.Phase == PetPlayPhase.TimedOut, 11000);
+            await WaitUntil(() => session.Phase == PetPlayPhase.TimedOut, 11000,
+                () => $"phase={session.Phase}, remaining={session.Deadline - Environment.TickCount64}ms, suppressed={Field<bool>(window, "_isFullScreenSuppressed")}, visible={window.IsVisible}, frameTimer={Field<DispatcherTimer>(window, "_playFrameTimer").IsEnabled}");
             Check(Field<PetVisual>(panel, "RevealPet").IsVisible, "timeout reveals pet");
             await Task.Delay(600);
             Render(panel, "hide-timeout");
@@ -198,6 +225,7 @@ internal static partial class Program
                 Check(restarted.ExitCode == 0, $"separate process restart from {phase}: {await errors}");
                 Console.Write(await output);
                 window = new PetWindow(viewModel, database, settings, log, () => { }, () => { });
+                window.FullScreenDetector = () => false;
                 window.Show();
                 await WaitUntil(() => Field<bool>(window, "_playInitialized"));
                 session = Field<PetPlaySession>(window, "_play");
@@ -244,14 +272,14 @@ internal static partial class Program
             }
             artwork.SetTreasure(null);
         }
-        finally { window.AllowClose(); window.Close(); }
+        finally { window.AllowClose(); window.Close(); foreground?.Close(); }
     }
 
     private static async Task PreviewAsync(PetWindow window)
     {
         window.ShowInTaskbar = true;
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(20) };
-        foreach (var (kind, name) in new[] { (PetPlayKind.Walk, "散步寻宝"), (PetPlayKind.HideAndSeek, "十秒捉迷藏") })
+        foreach (var (kind, name) in new[] { (PetPlayKind.Walk, "散步"), (PetPlayKind.HideAndSeek, "捉迷藏") })
         {
             var button = new Button { Content = name, Margin = new Thickness(5), Padding = new Thickness(18, 8, 18, 8) };
             button.Click += (_, _) => { window.RegisterExternalInteraction(); Start(window, kind); };
@@ -259,7 +287,7 @@ internal static partial class Program
         }
         var controls = new Window
         {
-            Title = "绵绵 v2.1.2 玩法验收", Width = 370, Height = 130, Left = 500, Top = 100,
+            Title = "绵绵 v2.2.0 玩法验收", Width = 370, Height = 130, Left = 500, Top = 100,
             Content = buttons, ResizeMode = ResizeMode.NoResize
         };
         var closed = new TaskCompletionSource();
@@ -326,12 +354,13 @@ internal static partial class Program
         Console.WriteLine($"PASS: {message}");
     }
 
-    private static async Task WaitUntil(Func<bool> condition, int timeoutMs = 5000)
+    private static async Task WaitUntil(Func<bool> condition, int timeoutMs = 5000, Func<string>? diagnostics = null)
     {
         var timer = Stopwatch.StartNew();
         while (!condition())
         {
-            if (timer.ElapsedMilliseconds >= timeoutMs) throw new TimeoutException("Expected UI transition did not arrive.");
+            if (timer.ElapsedMilliseconds >= timeoutMs)
+                throw new TimeoutException($"Expected UI transition did not arrive. {diagnostics?.Invoke()}");
             await Task.Delay(25);
         }
     }

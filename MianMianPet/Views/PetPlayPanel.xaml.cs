@@ -23,7 +23,7 @@ public partial class PetPlayPanel : UserControl
         Reset();
         GameStage.Visibility = Visibility.Collapsed;
         WalkContent.Visibility = Visibility.Visible;
-        TitleText.Text = "散步寻宝";
+        TitleText.Text = "散步";
         HintText.Text = "去云边走走，很快就回来～";
         CountdownText.Text = "散步中";
         TreasureIcon.Data = Geometry.Parse(WalkTreasures.All[4].Shape);
@@ -47,7 +47,7 @@ public partial class PetPlayPanel : UserControl
         Reset();
         GameStage.Visibility = Visibility.Visible;
         WalkContent.Visibility = Visibility.Collapsed;
-        TitleText.Text = "十秒捉迷藏";
+        TitleText.Text = "捉迷藏";
         HintText.Text = "藏进软软的云里，快来找我呀。";
         CountdownText.Text = "10s";
     }

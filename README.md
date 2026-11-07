@@ -1,6 +1,6 @@
 # 绵绵 AI 桌宠
 
-绵绵是一只 Windows 桌面小羊。点它可以聊天，空闲时它会散步寻宝或邀你捉迷藏。前台应用全屏时，绵绵会自动收起。
+绵绵是一只 Windows 桌面小羊。点它可以聊天，空闲时它会散步或邀你捉迷藏。前台应用全屏时，绵绵会自动收起。
 
 聊天时，`Enter` 发送，`Shift + Enter` 换行，`Esc` 关闭输入框。
 
@@ -47,6 +47,6 @@ dotnet run --project .\MianMianPet\MianMianPet.csproj
 
 运行 `.\publish.ps1` 打包，单文件程序在 `publish\win-x64\MianMianPet.exe`。
 
-运行 `dotnet run --project .\MianMianPet.Tests` 做回归检查。可加 `-- --config-only` 或 `-- --fullscreen-only` 单独检查配置或全屏避让。全屏测试会短暂切换到测试窗口，结果保存在 `TestResults`。
+运行 `dotnet run --project .\MianMianPet.Tests` 做回归检查，无需真实 API Key。测试会短暂切换到测试窗口，结果保存在 `TestResults`。
 
 [更新记录](CHANGELOG.md)

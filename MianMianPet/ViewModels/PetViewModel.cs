@@ -31,7 +31,9 @@ public sealed class PetViewModel : ObservableObject, IDisposable
     private Celebration? _pendingCelebration;
     private bool _checkingCelebration;
     private bool _openingGift;
-    private bool _presentationSuppressed;
+    private bool _fullScreenSuppressed;
+    private bool _windowHidden;
+    private bool _presentationSuppressed => _fullScreenSuppressed || _windowHidden;
     private int _bubbleAutoHideSeconds = LocalConfig.Current.Ai.BubbleAutoHideSeconds;
 
     public PetViewModel(
@@ -275,8 +277,19 @@ public sealed class PetViewModel : ObservableObject, IDisposable
 
     internal void SetPresentationSuppressed(bool suppressed)
     {
-        _presentationSuppressed = suppressed;
-        if (suppressed)
+        _fullScreenSuppressed = suppressed;
+        UpdatePresentationSuppression();
+    }
+
+    internal void SetWindowHidden(bool hidden)
+    {
+        _windowHidden = hidden;
+        UpdatePresentationSuppression();
+    }
+
+    private void UpdatePresentationSuppression()
+    {
+        if (_presentationSuppressed)
         {
             _bubbleTimer.Stop();
             _isBubbleHovered = false;
@@ -287,13 +300,17 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         RefreshGiftVisibility();
     }
 
-    public void NotifySettingsChanged()
+    public void NotifySettingsChanged(bool identityChanged = false)
     {
         OnPropertyChanged(nameof(PetName));
         OnPropertyChanged(nameof(InputPlaceholder));
-        BubbleText = string.Empty;
-        IsBubbleOpen = false;
-        _isBubbleHovered = false;
+        if (identityChanged)
+        {
+            _bubbleTimer.Stop();
+            BubbleText = string.Empty;
+            IsBubbleOpen = false;
+            _isBubbleHovered = false;
+        }
     }
 
     private bool CanSend() => !IsBusy && !string.IsNullOrWhiteSpace(InputText) && InputText.Length <= 2000;
@@ -322,12 +339,16 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         var receivedAnyContent = false;
         var requestAttempted = false;
         var exchangeSaved = false;
+        var contextGateHeld = false;
+        var reply = new StringBuilder();
 
         try
         {
             _bubbleTimer.Stop();
             _requestCancellation = new CancellationTokenSource(LocalConfig.Current.Experience.AiRequestTimeout);
             IsBusy = true;
+            await _conversationService.ContextGate.WaitAsync(_requestCancellation.Token);
+            contextGateHeld = true;
             IsThinking = true;
             IsHoverHintVisible = false;
             IsInputOpen = false;
@@ -349,17 +370,18 @@ public sealed class PetViewModel : ObservableObject, IDisposable
                 }
 
                 _pendingText.Append(delta);
+                reply.Append(delta);
             }
 
             FlushPendingText(this, EventArgs.Empty);
-            if (string.IsNullOrWhiteSpace(BubbleText))
+            if (string.IsNullOrWhiteSpace(reply.ToString()))
             {
                 throw new InvalidOperationException("这次没有收到回复，请再试一次。 ");
             }
 
             await _conversationService.SaveExchangeAsync(
                 userMessage,
-                ChatMessage.Assistant(BubbleText));
+                ChatMessage.Assistant(reply.ToString()));
             exchangeSaved = true;
             InputText = string.Empty;
             await _logService.InfoAsync("chat_completed");
@@ -409,6 +431,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            if (contextGateHeld) _conversationService.ContextGate.Release();
             _flushTimer.Stop();
             _requestCancellation?.Dispose();
             _requestCancellation = null;
@@ -426,7 +449,9 @@ public sealed class PetViewModel : ObservableObject, IDisposable
     };
 
     private string PickFailureReply(IReadOnlyList<string> replies) =>
-        PetExperienceConfig.PickReply(_random, replies);
+        PetExperienceConfig.PickReply(_random, replies)
+            .Replace("{UserTitle}", _settingsService.Current.UserTitle, StringComparison.Ordinal)
+            .Replace("{PetName}", PetName, StringComparison.Ordinal);
 
     private async Task SaveUnsuccessfulMessageAsync(ChatMessage userMessage, MessageStatus status)
     {
@@ -465,7 +490,8 @@ public sealed class PetViewModel : ObservableObject, IDisposable
     }
 
     private void ScheduleReadingTime() =>
-        ScheduleBubbleAutoHide(Math.Clamp(2 + BubbleText.Length / 12, 4, 20));
+        ScheduleBubbleAutoHide(Math.Max(LocalConfig.Current.Ai.BubbleAutoHideSeconds,
+            Math.Clamp(2 + BubbleText.Length / 12, 4, 20)));
 
     private void OnCommandError(Exception exception)
     {

@@ -15,6 +15,7 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _alwaysOnTop;
     private string _statusMessage = string.Empty;
     private bool _isWorking;
+    private bool _initialStartWithWindows;
 
     public SettingsViewModel(
         SettingsService settingsService,
@@ -28,6 +29,7 @@ public sealed class SettingsViewModel : ObservableObject
         _petName = settings.PetName;
         _userTitle = settings.UserTitle;
         _startWithWindows = startupService.IsEnabled();
+        _initialStartWithWindows = _startWithWindows;
         _alwaysOnTop = settings.AlwaysOnTop;
     }
 
@@ -37,6 +39,7 @@ public sealed class SettingsViewModel : ObservableObject
     public bool AlwaysOnTop { get => _alwaysOnTop; set => SetProperty(ref _alwaysOnTop, value); }
     public bool IsWorking { get => _isWorking; private set => SetProperty(ref _isWorking, value); }
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
+    public bool IdentityChangedOnSave { get; private set; }
 
     public event EventHandler? SettingsSaved;
 
@@ -48,7 +51,12 @@ public sealed class SettingsViewModel : ObservableObject
         }
 
         IsWorking = true;
+        IdentityChangedOnSave = false;
         StatusMessage = "正在保存…";
+        var contextLocked = false;
+        var contextReset = false;
+        var settingsSaved = false;
+        long previousContextStart = 0;
         try
         {
             var previous = _settingsService.Current;
@@ -63,36 +71,41 @@ public sealed class SettingsViewModel : ObservableObject
                 !string.Equals(previous.PetName, updated.PetName, StringComparison.Ordinal) ||
                 !string.Equals(previous.UserTitle, updated.UserTitle, StringComparison.Ordinal);
 
-            var previousRegistryEnabled = _startupService.IsEnabled();
-            try
-            {
-                _startupService.SetEnabled(updated.StartWithWindows);
-                await _settingsService.SaveAsync(updated);
-            }
-            catch
-            {
-                try
-                {
-                    _startupService.SetEnabled(previousRegistryEnabled);
-                }
-                catch
-                {
-                    // 保留最初的保存异常，由设置窗口展示给用户。
-                }
-
-                throw;
-            }
-
             if (identityChanged)
             {
+                StatusMessage = "正在等待这次聊天结束…";
+                await _conversationService.ContextGate.WaitAsync();
+                contextLocked = true;
+                previousContextStart = await _conversationService.GetContextStartIdAsync();
                 await _conversationService.ResetContextAsync();
+                contextReset = true;
             }
+
+            StatusMessage = "正在保存…";
+            await _settingsService.SaveWithStartupAsync(updated, _startupService, StartWithWindows != _initialStartWithWindows);
+            settingsSaved = true;
+            IdentityChangedOnSave = identityChanged;
+            _initialStartWithWindows = _settingsService.Current.StartWithWindows;
+            StartWithWindows = _initialStartWithWindows;
 
             StatusMessage = "已保存。";
             SettingsSaved?.Invoke(this, EventArgs.Empty);
         }
+        catch (Exception saveError)
+        {
+            if (contextReset && !settingsSaved)
+            {
+                try { await _conversationService.RestoreContextAsync(previousContextStart); }
+                catch (Exception rollbackError)
+                {
+                    throw new AggregateException("设置未保存，聊天上下文的恢复也未完成。", saveError, rollbackError);
+                }
+            }
+            throw;
+        }
         finally
         {
+            if (contextLocked) _conversationService.ContextGate.Release();
             IsWorking = false;
         }
     }

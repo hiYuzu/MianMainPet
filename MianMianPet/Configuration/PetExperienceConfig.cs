@@ -43,65 +43,65 @@ internal sealed class PetExperienceConfig
     public string[] NetworkFailureReplies { get; set; } =
     [
         "外面的风好像把声音吹散了……等一下再和我说一次吧。",
-        "云朵把绵绵的信号挡住啦，等等它飘过去吧。",
-        "绵绵刚刚没能听清，再等一小会儿好不好？"
+        "云朵把{PetName}的信号挡住啦，等等它飘过去吧。",
+        "{PetName}刚刚没能听清，再等一小会儿好不好？"
     ];
 
     public string[] TimeoutFailureReplies { get; set; } =
     [
-        "唔……绵绵刚刚走神了，再和我说一次好不好？",
+        "唔……{PetName}刚刚走神了，再和我说一次好不好？",
         "这句话在云朵里绕得有点久，我们一会儿再试试吧。",
         "咩……刚才没有接住这句话。"
     ];
 
     public string[] ServiceFailureReplies { get; set; } =
     [
-        "绵绵现在有一点点迷糊，休息一下就回来啦。",
-        "今天的云有点厚，绵绵暂时没办法自由说话了。",
-        "绵绵的声音暂时躲起来了，过一会儿再来找我吧。"
+        "{PetName}现在有一点点迷糊，休息一下就回来啦。",
+        "今天的云有点厚，{PetName}暂时没办法自由说话了。",
+        "{PetName}的声音暂时躲起来了，过一会儿再来找我吧。"
     ];
 
     public string[] GeneralFailureReplies { get; set; } =
     [
         "咩……刚才那句话不小心从羊毛里滑走了。",
-        "绵绵刚刚打了个小喷嚏，没有把话说出来。",
-        "这次没有接住，不过绵绵还在这里呀。"
+        "{PetName}刚刚打了个小喷嚏，没有把话说出来。",
+        "这次没有接住，不过{PetName}还在这里呀。"
     ];
 
     public string[] MorningCompanionReplies { get; set; } =
     [
         "早呀，{UserTitle}。今天也要慢慢来，不用着急。",
-        "晨光软软的，绵绵把最好的一小团留给{UserTitle}。",
+        "晨光软软的，{PetName}把最好的一小团留给{UserTitle}。",
         "新的一天开始啦，先送给{UserTitle}一个羊毛抱抱。"
     ];
 
     public string[] DayCompanionReplies { get; set; } =
     [
-        "{UserTitle}认真做事情的样子，绵绵有偷偷看到哦。",
+        "{UserTitle}认真做事情的样子，{PetName}有偷偷看到哦。",
         "路过一下，给{UserTitle}放下一小团软绵绵。",
-        "要是有一点累，就看绵绵一眼吧。",
-        "绵绵没有打扰，只是在旁边陪着{UserTitle}。"
+        "要是有一点累，就看{PetName}一眼吧。",
+        "{PetName}没有打扰，只是在旁边陪着{UserTitle}。"
     ];
 
     public string[] DuskCompanionReplies { get; set; } =
     [
         "天色变得软软的啦，{UserTitle}今天辛苦了。",
-        "晚霞来了，绵绵想把暖暖的颜色分给{UserTitle}。",
+        "晚霞来了，{PetName}想把暖暖的颜色分给{UserTitle}。",
         "忙了一天，也记得给自己留一点轻松呀。"
     ];
 
     public string[] NightCompanionReplies { get; set; } =
     [
-        "夜里安静下来了，绵绵还在这里陪着{UserTitle}。",
+        "夜里安静下来了，{PetName}还在这里陪着{UserTitle}。",
         "星星亮起来啦，今天也辛苦了。",
         "困了就早点休息吧，没做完的事情明天也会等你。"
     ];
 
     public string[] LateNightCompanionReplies { get; set; } =
     [
-        "夜已经很深啦，绵绵陪{UserTitle}把这一点做完就休息。",
+        "夜已经很深啦，{PetName}陪{UserTitle}把这一点做完就休息。",
         "小声提醒一下：现在很晚了，要照顾好自己呀。",
-        "绵绵开始犯困啦，{UserTitle}也不要熬得太久哦。"
+        "{PetName}开始犯困啦，{UserTitle}也不要熬得太久哦。"
     ];
 
     internal void Validate()
@@ -132,6 +132,20 @@ internal sealed class PetExperienceConfig
         };
         if (replyGroups.Any(group => group is null || group.Length == 0 || group.Any(string.IsNullOrWhiteSpace)))
             throw new InvalidDataException("experience 中的每组文案至少需要一条非空字符串。");
+
+        // Upgrade only the exact old built-in replies; preserve user-written text.
+        var defaults = new PetExperienceConfig();
+        var legacyReplies = new[]
+        {
+            defaults.NetworkFailureReplies, defaults.TimeoutFailureReplies, defaults.ServiceFailureReplies,
+            defaults.GeneralFailureReplies, defaults.MorningCompanionReplies, defaults.DayCompanionReplies,
+            defaults.DuskCompanionReplies, defaults.NightCompanionReplies, defaults.LateNightCompanionReplies
+        }.SelectMany(group => group).Where(reply => reply.Contains("{PetName}", StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToDictionary(reply => reply.Replace("{PetName}", "绵绵", StringComparison.Ordinal), reply => reply, StringComparer.Ordinal);
+        foreach (var group in replyGroups)
+            for (var i = 0; i < group.Length; i++)
+                if (legacyReplies.TryGetValue(group[i], out var replacement)) group[i] = replacement;
     }
 
     internal PetDayPhase GetDayPhase(DateTime localTime)

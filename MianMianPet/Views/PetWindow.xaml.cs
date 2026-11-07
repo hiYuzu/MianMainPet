@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -94,6 +95,7 @@ public partial class PetWindow : Window
         {
             _inputWindow.Topmost = Topmost;
         }
+        SynchronizePopupZOrder();
         const double fixedPetSize = 150d;
         Width = fixedPetSize;
         Height = fixedPetSize;
@@ -150,7 +152,7 @@ public partial class PetWindow : Window
             SetDefaultPosition();
         }
 
-        if (!RefreshFullScreenSuppression())
+        if (IsVisible && !RefreshFullScreenSuppression())
         {
             UpdateDayPhase();
             _dayPhaseTimer.Start();
@@ -162,6 +164,22 @@ public partial class PetWindow : Window
     }
 
     private void Window_OnPreviewMouseDown(object sender, MouseButtonEventArgs e) => RegisterInteraction();
+
+    private void Window_OnLocationChanged(object? sender, EventArgs e)
+    {
+        if (IsLoaded && !_isClosing) PositionInputWindow();
+    }
+
+    private void Window_OnActivationChanged(object? sender, EventArgs e)
+    {
+        if (IsLoaded && !_isClosing) SynchronizePopupZOrder();
+    }
+
+    private void SynchronizePopupZOrder()
+    {
+        PopupWindowHelper.SynchronizeZOrder(this, BubblePopup);
+        PopupWindowHelper.SynchronizeZOrder(this, PlayPopup);
+    }
 
     private void Pet_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -180,6 +198,7 @@ public partial class PetWindow : Window
         RegisterInteraction();
         if (!_isPointerDown || e.LeftButton != MouseButtonState.Pressed)
         {
+            if (_isPointerDown) CancelPointerInteraction();
             TrackPetting(e.GetPosition(this));
             return;
         }
@@ -225,6 +244,23 @@ public partial class PetWindow : Window
         }
 
         e.Handled = true;
+    }
+
+    private void Pet_OnLostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (_isPointerDown) CancelPointerInteraction();
+    }
+
+    private void CancelPointerInteraction()
+    {
+        var didDrag = _didDrag;
+        _isPointerDown = false;
+        _didDrag = false;
+        _lastPetPoint = null;
+        PetHitArea.ReleaseMouseCapture();
+        if (didDrag) EnsureValidPosition();
+        if (!_viewModel.IsBusy && !_viewModel.IsInputOpen) _stateController.SetState(PetState.Idle);
+        RegisterInteraction();
     }
 
     private void Pet_OnMouseEnter(object sender, MouseEventArgs e)
@@ -284,7 +320,11 @@ public partial class PetWindow : Window
         }
     }
 
-    private void BubblePopup_OnOpened(object? sender, EventArgs e) => PlaceBubblePopup();
+    private void BubblePopup_OnOpened(object? sender, EventArgs e)
+    {
+        PlaceBubblePopup();
+        PopupWindowHelper.SynchronizeZOrder(this, BubblePopup);
+    }
 
     private void Bubble_OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -303,6 +343,7 @@ public partial class PetWindow : Window
         var width = BubbleControl.ActualWidth > 0 ? BubbleControl.ActualWidth : 370;
         var height = Math.Clamp(BubbleControl.ActualHeight, 80, maximumHeight);
         ScreenPlacementHelper.PlacePopup(this, BubblePopup, width, height);
+        PopupWindowHelper.RefreshPosition(this, BubblePopup);
     }
 
     private void Bubble_OnMouseEnter(object sender, MouseEventArgs e)
@@ -368,6 +409,7 @@ public partial class PetWindow : Window
 
     private void PositionInputWindow()
     {
+        if (BubblePopup.IsOpen) PlaceBubblePopup();
         if (PlayPopup.IsOpen) PlayPopup_OnOpened(this, EventArgs.Empty);
         if (_inputWindow is not null && _viewModel.IsInputOpen)
         {
@@ -424,8 +466,18 @@ public partial class PetWindow : Window
 
     private void Window_OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
+        if (_isClosing) return;
         if (e.NewValue is false)
         {
+            _stateController.SetSuspended(true);
+            PlayPopup.PopupAnimation = PopupAnimation.None;
+            BubblePopup.PopupAnimation = PopupAnimation.None;
+            _viewModel.SetWindowHidden(true);
+            _isPointerDown = false;
+            _didDrag = false;
+            _lastPetPoint = null;
+            PetHitArea.ReleaseMouseCapture();
+            _fullScreenTimer.Stop();
             CancelPlay(resumeIdle: false);
             _ambientTimer.Stop();
             _sleepTimer.Stop();
@@ -437,7 +489,12 @@ public partial class PetWindow : Window
         }
         else
         {
+            _viewModel.SetWindowHidden(false);
+            _fullScreenTimer.Start();
             if (RefreshFullScreenSuppression()) return;
+            PlayPopup.PopupAnimation = PopupAnimation.Fade;
+            BubblePopup.PopupAnimation = PopupAnimation.Fade;
+            _stateController.SetSuspended(false);
             UpdateDayPhase();
             _dayPhaseTimer.Start();
             RestartIdleTimers();

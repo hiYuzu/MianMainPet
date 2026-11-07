@@ -21,7 +21,9 @@ public sealed class DatabaseService
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        ";
 
+    private const string LegacyConversationRepairSql = @"
         -- 2.0.1 及更早版本可能在请求失败时留下 complete 状态的孤立用户消息。
         -- 只有紧随其后的下一条完整消息是 assistant，用户消息才属于完整对话。
         UPDATE conversations
@@ -42,6 +44,8 @@ public sealed class DatabaseService
     private readonly LogService _logService;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    internal string? RecoveryBackupPath { get; private set; }
+
     public DatabaseService(AppPaths paths, LogService logService)
     {
         _paths = paths;
@@ -58,18 +62,26 @@ public sealed class DatabaseService
     public async Task InitializeAsync()
     {
         await _gate.WaitAsync();
+        string? sidecarSnapshot = null;
+        var initialized = false;
         try
         {
-            await using var connection = new SqliteConnection(ConnectionString);
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = SchemaSql;
-            await command.ExecuteNonQueryAsync();
+            // Even a read-only SQLite connection may rewrite SHM, so retain crash-recovery files first.
+            var sidecars = new[] { _paths.DatabaseFile + "-wal", _paths.DatabaseFile + "-shm" }.Where(File.Exists).ToArray();
+            if (sidecars.Length > 0)
+            {
+                sidecarSnapshot = CreateRecoveryDirectory();
+                foreach (var file in sidecars)
+                    File.Copy(file, Path.Combine(sidecarSnapshot, Path.GetFileName(file)));
+            }
+            await InitializeDatabaseAsync();
+            initialized = true;
         }
         catch (SqliteException ex) when (IsDatabaseCorruption(ex))
         {
             await _logService.ErrorAsync("database_corruption_detected", ex);
-            await RecoverCorruptDatabaseAsync();
+            await RecoverCorruptDatabaseAsync(sidecarSnapshot);
+            initialized = true;
         }
         catch (SqliteException ex)
         {
@@ -78,6 +90,19 @@ public sealed class DatabaseService
         }
         finally
         {
+            if (initialized && sidecarSnapshot is not null && sidecarSnapshot != RecoveryBackupPath)
+            {
+                try
+                {
+                    foreach (var suffix in new[] { "-wal", "-shm" })
+                        File.Delete(Path.Combine(sidecarSnapshot, Path.GetFileName(_paths.DatabaseFile) + suffix));
+                    Directory.Delete(sidecarSnapshot);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    await _logService.ErrorAsync("database_recovery_snapshot_cleanup_failed", ex);
+                }
+            }
             _gate.Release();
         }
     }
@@ -265,29 +290,74 @@ public sealed class DatabaseService
         }
     }
 
-    private async Task RecoverCorruptDatabaseAsync()
+    private string CreateRecoveryDirectory()
+    {
+        var directory = Path.Combine(_paths.Root, $"mianmian-corrupt-{DateTime.Now:yyyyMMddHHmmss}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    private async Task RecoverCorruptDatabaseAsync(string? sidecarSnapshot)
     {
         if (!File.Exists(_paths.DatabaseFile))
         {
             return;
         }
 
-        var backup = Path.Combine(_paths.Root, $"mianmian-corrupt-{DateTime.Now:yyyyMMddHHmmss}.db");
-        File.Move(_paths.DatabaseFile, backup, true);
-        foreach (var suffix in new[] { "-wal", "-shm" })
-        {
-            var sidecar = _paths.DatabaseFile + suffix;
-            if (File.Exists(sidecar))
-            {
-                File.Delete(sidecar);
-            }
-        }
+        using (var pooledConnection = new SqliteConnection(ConnectionString))
+            SqliteConnection.ClearPool(pooledConnection);
 
-        await using var connection = new SqliteConnection(ConnectionString);
+        var backup = sidecarSnapshot ?? CreateRecoveryDirectory();
+        var files = new[] { _paths.DatabaseFile, _paths.DatabaseFile + "-wal", _paths.DatabaseFile + "-shm" }
+            .Where(File.Exists).ToArray();
+        // Finish the complete backup before removing any original recovery material.
+        foreach (var file in files)
+        {
+            var destination = Path.Combine(backup, Path.GetFileName(file));
+            if (!File.Exists(destination)) File.Copy(file, destination);
+        }
+        RecoveryBackupPath = backup;
+        await _logService.InfoAsync($"database_recovery_backup_created; backup={backup}");
+        foreach (var file in files)
+            File.Delete(file);
+
+        await InitializeDatabaseAsync();
+        await _logService.InfoAsync($"database_recovered; backup={backup}");
+    }
+
+    private async Task InitializeDatabaseAsync()
+    {
+        if (File.Exists(_paths.DatabaseFile))
+        {
+            // Probe without write access: opening a corrupt database for writing can discard its WAL sidecars.
+            var probeConnection = new SqliteConnectionStringBuilder(ConnectionString)
+            {
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false
+            }.ToString();
+            await using var probe = new SqliteConnection(probeConnection);
+            await probe.OpenAsync();
+            await using var probeCommand = probe.CreateCommand();
+            probeCommand.CommandText = "PRAGMA schema_version;";
+            await probeCommand.ExecuteScalarAsync();
+        }
+        // A failed initialization must release the native handle before file recovery on Windows.
+        var initializationConnection = new SqliteConnectionStringBuilder(ConnectionString) { Pooling = false }.ToString();
+        await using var connection = new SqliteConnection(initializationConnection);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = SchemaSql;
         await command.ExecuteNonQueryAsync();
+        command.CommandText = "PRAGMA user_version;";
+        var version = Convert.ToInt32(await command.ExecuteScalarAsync());
+        if (version < 1)
+        {
+            using var transaction = connection.BeginTransaction();
+            command.Transaction = transaction;
+            command.CommandText = LegacyConversationRepairSql + " PRAGMA user_version = 1;";
+            await command.ExecuteNonQueryAsync();
+            transaction.Commit();
+        }
     }
 
     private static bool IsDatabaseCorruption(SqliteException exception)

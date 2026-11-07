@@ -25,18 +25,17 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        _singleInstance = new SingleInstanceGuard();
-        if (!_singleInstance.IsPrimary)
-        {
-            await SingleInstanceGuard.NotifyPrimaryAsync();
-            Shutdown();
-            return;
-        }
-
         try
         {
             var paths = new AppPaths();
             var logService = new LogService(paths);
+            _singleInstance = new SingleInstanceGuard(logService);
+            if (!_singleInstance.IsPrimary)
+            {
+                await SingleInstanceGuard.NotifyPrimaryAsync(logService);
+                Shutdown();
+                return;
+            }
             await LocalConfig.LoadAsync(paths, logService);
             _settingsService = new SettingsService(paths, logService);
             await _settingsService.LoadAsync();
@@ -44,17 +43,18 @@ public partial class App : Application
             var database = new DatabaseService(paths, logService);
             await database.InitializeAsync();
             _conversationService = new ConversationService(database);
+            await _settingsService.CompleteRecoveryAsync(_conversationService);
 
             var persona = new PetPersona(LocalConfig.Current.PersonaPrompt);
             _httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("MianMianPet/2.1.2");
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("MianMianPet/2.2.0");
             var deepSeekClient = new DeepSeekClient(_httpClient, _settingsService, persona);
             _petViewModel = new PetViewModel(
                 deepSeekClient,
                 _conversationService,
                 _settingsService,
                 logService,
-                new CelebrationService(database, paths));
+                new CelebrationService(database, paths, logService));
             await _petViewModel.InitializeAsync();
             _petWindow = new PetWindow(
                 _petViewModel,
@@ -76,6 +76,11 @@ public partial class App : Application
             _singleInstance.ActivationRequested += (_, _) => Dispatcher.Invoke(ShowPet);
             _singleInstance.StartListening();
             await logService.InfoAsync("application_started");
+            var recoveryNotice = _settingsService.RecoveryNotice;
+            if (database.RecoveryBackupPath is { } backupPath)
+                recoveryNotice = $"{recoveryNotice}\n聊天数据库已重建，旧文件保留在：\n{backupPath}".Trim();
+            if (!string.IsNullOrWhiteSpace(recoveryNotice))
+                MessageBox.Show(recoveryNotice, "绵绵已恢复本地数据", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
@@ -109,7 +114,7 @@ public partial class App : Application
         viewModel.SettingsSaved += (_, _) =>
         {
             _petWindow?.ApplySettings();
-            _petViewModel?.NotifySettingsChanged();
+            _petViewModel?.NotifySettingsChanged(viewModel.IdentityChangedOnSave);
             _trayService?.Refresh();
         };
         _settingsWindow = new SettingsWindow(viewModel);

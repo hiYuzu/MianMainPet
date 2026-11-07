@@ -48,7 +48,7 @@ public sealed class TrayService : IDisposable
         _appIcon = LoadApplicationIcon();
         _notifyIcon = new WinForms.NotifyIcon
         {
-            Text = "绵绵 AI 桌宠",
+            Text = CreateToolTip(_settingsService.Current.PetName),
             Icon = _appIcon,
             ContextMenuStrip = menu,
             Visible = true
@@ -58,41 +58,31 @@ public sealed class TrayService : IDisposable
 
     public void Refresh()
     {
-        _notifyIcon.Text = $"{_settingsService.Current.PetName} AI 桌宠";
+        _notifyIcon.Text = CreateToolTip(_settingsService.Current.PetName);
         _startupItem.Checked = _startupService.IsEnabled();
+    }
+
+    internal static string CreateToolTip(string petName)
+    {
+        var text = $"{petName} AI 桌宠";
+        const int maximumLength = 63;
+        if (text.Length <= maximumLength) return text;
+        var length = char.IsHighSurrogate(text[maximumLength - 1]) ? maximumLength - 1 : maximumLength;
+        return text[..length];
     }
 
     private async Task ToggleStartupAsync()
     {
         var requestedEnabled = _startupItem.Checked;
-        var previousSettingEnabled = _settingsService.Current.StartWithWindows;
-        bool? previousRegistryEnabled = null;
         _startupItem.Enabled = false;
         try
         {
-            previousRegistryEnabled = _startupService.IsEnabled();
-            _startupService.SetEnabled(requestedEnabled);
-            await _settingsService.UpdateStartWithWindowsAsync(requestedEnabled);
-            _startupItem.Checked = requestedEnabled;
+            await _settingsService.UpdateStartWithWindowsAsync(requestedEnabled, _startupService);
+            _startupItem.Checked = _startupService.IsEnabled();
         }
         catch (Exception ex)
         {
-            Exception? rollbackException = null;
-            Exception? reconciliationException = null;
-            var actualEnabled = previousRegistryEnabled ?? previousSettingEnabled;
-
-            if (previousRegistryEnabled is { } registryValue)
-            {
-                try
-                {
-                    _startupService.SetEnabled(registryValue);
-                }
-                catch (Exception rollbackError)
-                {
-                    rollbackException = rollbackError;
-                }
-            }
-
+            var actualEnabled = _settingsService.Current.StartWithWindows;
             try
             {
                 actualEnabled = _startupService.IsEnabled();
@@ -102,33 +92,10 @@ public sealed class TrayService : IDisposable
                 // 无法读取注册表时，至少让界面回到操作前的已知状态。
             }
 
-            if (_settingsService.Current.StartWithWindows != actualEnabled)
-            {
-                try
-                {
-                    await _settingsService.UpdateStartWithWindowsAsync(actualEnabled);
-                }
-                catch (Exception reconciliationError)
-                {
-                    reconciliationException = reconciliationError;
-                }
-            }
-
             await Application.Current.Dispatcher.InvokeAsync(() =>
             {
                 _startupItem.Checked = actualEnabled;
-                var details = ex.Message;
-                if (rollbackException is not null)
-                {
-                    details += $"\n\n注册表回滚也未成功：{rollbackException.Message}";
-                }
-
-                if (reconciliationException is not null)
-                {
-                    details += $"\n\n配置状态同步也未成功：{reconciliationException.Message}";
-                }
-
-                MessageBox.Show(details, "开机启动设置失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(ex.Message, "开机启动设置失败", MessageBoxButton.OK, MessageBoxImage.Warning);
             });
         }
         finally

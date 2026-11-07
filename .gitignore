@@ -7,6 +7,7 @@ publish/
 *.suo
 *.log
 TestResults/
+/docs/
 *.binlog
 
 # Local app settings and chat history
@@ -14,6 +15,9 @@ config.json
 celebrations.json
 settings.json
 settings.json.tmp
+settings-invalid-*.json
+settings.context-reset-required
 mianmian.db
 mianmian.db-*
 mianmian-corrupt-*.db*
+mianmian-corrupt-*/

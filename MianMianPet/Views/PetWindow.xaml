@@ -16,6 +16,9 @@
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         Loaded="Window_OnLoaded"
+        LocationChanged="Window_OnLocationChanged"
+        Activated="Window_OnActivationChanged"
+        Deactivated="Window_OnActivationChanged"
         PreviewMouseDown="Window_OnPreviewMouseDown"
         IsVisibleChanged="Window_OnIsVisibleChanged"
         Closing="Window_OnClosing">
@@ -28,6 +31,7 @@
                 MouseLeftButtonDown="Pet_OnMouseLeftButtonDown"
                 MouseMove="Pet_OnMouseMove"
                 MouseLeftButtonUp="Pet_OnMouseLeftButtonUp"
+                LostMouseCapture="Pet_OnLostMouseCapture"
                 MouseEnter="Pet_OnMouseEnter"
                 MouseLeave="Pet_OnMouseLeave">
             <Border.ContextMenu>

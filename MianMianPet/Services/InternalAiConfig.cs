@@ -12,6 +12,7 @@ internal sealed class InternalAiConfig
     public double Temperature { get; set; } = 0.8;
     public int ContextMessageCount { get; set; } = 16;
     public int MaxContextCharacters { get; set; } = 12_000;
+    // Minimum reading time; longer replies may remain visible for longer.
     public int BubbleAutoHideSeconds { get; set; } = 2;
 
     internal bool IsConfigured =>

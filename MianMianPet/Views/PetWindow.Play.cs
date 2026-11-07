@@ -203,8 +203,11 @@ public partial class PetWindow
         }
     }
 
-    private void PlayPopup_OnOpened(object? sender, EventArgs e) =>
+    private void PlayPopup_OnOpened(object? sender, EventArgs e)
+    {
         ScreenPlacementHelper.PlacePopup(this, PlayPopup, PlayPanel.Width, PlayPanel.Height);
+        PopupWindowHelper.RefreshPosition(this, PlayPopup);
+    }
 
     private void DisposePlay()
     {

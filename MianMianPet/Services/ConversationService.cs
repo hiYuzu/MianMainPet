@@ -7,6 +7,7 @@ public sealed class ConversationService
 {
     private const string ContextStartIdKey = "conversation.context.start_id";
     private readonly DatabaseService _database;
+    internal SemaphoreSlim ContextGate { get; } = new(1, 1);
 
     public ConversationService(DatabaseService database)
     {
@@ -69,7 +70,10 @@ public sealed class ConversationService
         await _database.SetStateAsync(ContextStartIdKey, latestId.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    private async Task<long> GetContextStartIdAsync()
+    internal Task RestoreContextAsync(long startId) =>
+        _database.SetStateAsync(ContextStartIdKey, Math.Max(0, startId).ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    internal async Task<long> GetContextStartIdAsync()
     {
         var value = await _database.GetStateAsync(ContextStartIdKey);
         return long.TryParse(value, out var id) ? Math.Max(0, id) : 0;
