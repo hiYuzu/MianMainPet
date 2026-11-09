@@ -1,5 +1,4 @@
 using System.Windows;
-using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using MianMianPet.Infrastructure;
 
@@ -22,8 +21,6 @@ public partial class PetWindow
         {
             // Close native popups as well as hiding the pet; opacity alone leaves hit targets alive.
             PetRoot.Visibility = Visibility.Hidden;
-            PlayPopup.PopupAnimation = PopupAnimation.None;
-            BubblePopup.PopupAnimation = PopupAnimation.None;
             _stateController.SetSuspended(true);
             CancelPlay(resumeIdle: false);
             _ambientTimer.Stop();
@@ -41,8 +38,6 @@ public partial class PetWindow
         else
         {
             _viewModel.SetPresentationSuppressed(false);
-            PlayPopup.PopupAnimation = PopupAnimation.Fade;
-            BubblePopup.PopupAnimation = PopupAnimation.Fade;
             PetRoot.Visibility = Visibility.Visible;
             _stateController.SetSuspended(!IsVisible);
             _playIdleSince = Environment.TickCount64;

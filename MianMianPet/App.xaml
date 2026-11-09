@@ -15,6 +15,59 @@
         <SolidColorBrush x:Key="BorderBrush" Color="#E9DED1" />
         <SolidColorBrush x:Key="ErrorBrush" Color="#C9827A" />
 
+        <SolidColorBrush x:Key="CloudBorderBrush" Color="#EADCE6" />
+        <SolidColorBrush x:Key="CloudTintBrush" Color="#F7EAF2" />
+        <SolidColorBrush x:Key="CloudInkBrush" Color="#62485F" />
+        <SolidColorBrush x:Key="CloudMutedBrush" Color="#7C6577" />
+
+        <Style x:Key="FloatingSurfaceMotion" TargetType="FrameworkElement">
+            <Setter Property="RenderTransform">
+                <Setter.Value><TranslateTransform /></Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsVisible" Value="True">
+                    <Trigger.EnterActions>
+                        <BeginStoryboard Name="EnterCard">
+                            <Storyboard FillBehavior="Stop">
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.16" />
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                 From="6" To="0" Duration="0:0:0.22">
+                                    <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.EnterActions>
+                    <Trigger.ExitActions><RemoveStoryboard BeginStoryboardName="EnterCard" /></Trigger.ExitActions>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="FloatingCard" TargetType="Border">
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="CornerRadius" Value="22" />
+            <Setter Property="BorderBrush" Value="{StaticResource CloudBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Background">
+                <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#FFFFFEFC" Offset="0" />
+                        <GradientStop Color="#FFFFF8FB" Offset="1" />
+                    </LinearGradientBrush>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Effect">
+                <Setter.Value><DropShadowEffect Color="#63465F" BlurRadius="14" ShadowDepth="3" Opacity="0.2" /></Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CloudMark" TargetType="Path">
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="12" />
+            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="Fill" Value="#AB6E8D" />
+            <Setter Property="Data" Value="M5,14 C-1,14 -1,6 4,6 C5,1 11,0 14,4 C18,1 23,4 22,8 C27,9 26,14 22,14 Z" />
+        </Style>
+
         <Style TargetType="TextBlock">
             <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />

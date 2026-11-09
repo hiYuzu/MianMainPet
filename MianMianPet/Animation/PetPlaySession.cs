@@ -3,12 +3,14 @@ using MianMianPet.Models;
 namespace MianMianPet.Animation;
 
 internal enum PetPlayKind { Walk, HideAndSeek }
-internal enum PetPlayPhase { Idle, Walking, ShowingTreasure, Hiding, Found, TimedOut }
+internal enum PetPlayPhase { Idle, WalkGreeting, Walking, Returning, ShowingTreasure, HideGreeting, Hiding, Found, TimedOut }
 
 // Only the last completed activity is persisted. Deadlines and treasures belong to this session.
 internal sealed class PetPlaySession
 {
+    internal const long GreetingMilliseconds = 1450;
     internal const long WalkMilliseconds = 4000;
+    internal const long ReturnMilliseconds = 820;
     internal const long TreasureMilliseconds = 7000;
     internal const long HidingMilliseconds = 10000;
     internal const long RevealMilliseconds = 1800;
@@ -23,8 +25,8 @@ internal sealed class PetPlaySession
     {
         if (IsActive) return;
         Treasure = treasure;
-        Phase = PetPlayPhase.Walking;
-        Deadline = now + WalkMilliseconds;
+        Phase = PetPlayPhase.WalkGreeting;
+        Deadline = now + GreetingMilliseconds;
     }
 
     internal void StartHiding(int cloud, long now)
@@ -32,8 +34,8 @@ internal sealed class PetPlaySession
         if (IsActive) return;
         if (cloud is < 0 or > 2) throw new ArgumentOutOfRangeException(nameof(cloud));
         HiddenCloud = cloud;
-        Phase = PetPlayPhase.Hiding;
-        Deadline = now + HidingMilliseconds;
+        Phase = PetPlayPhase.HideGreeting;
+        Deadline = now + GreetingMilliseconds;
     }
 
     internal void Advance(long now)
@@ -41,9 +43,21 @@ internal sealed class PetPlaySession
         if (!IsActive || now < Deadline) return;
         switch (Phase)
         {
+            case PetPlayPhase.WalkGreeting:
+                Phase = PetPlayPhase.Walking;
+                Deadline = now + WalkMilliseconds;
+                break;
             case PetPlayPhase.Walking:
+                Phase = PetPlayPhase.Returning;
+                Deadline = now + ReturnMilliseconds;
+                break;
+            case PetPlayPhase.Returning:
                 Phase = PetPlayPhase.ShowingTreasure;
                 Deadline = now + TreasureMilliseconds;
+                break;
+            case PetPlayPhase.HideGreeting:
+                Phase = PetPlayPhase.Hiding;
+                Deadline = now + HidingMilliseconds;
                 break;
             case PetPlayPhase.Hiding:
                 Phase = PetPlayPhase.TimedOut;
@@ -64,8 +78,6 @@ internal sealed class PetPlaySession
         Deadline = now + RevealMilliseconds;
         return true;
     }
-
-    internal int SecondsLeft(long now) => (int)Math.Ceiling(Math.Max(0, Deadline - now) / 1000d);
 
     internal bool IsPeeking(long now)
     {

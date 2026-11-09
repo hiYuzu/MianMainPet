@@ -79,19 +79,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
     public string BubbleText
     {
         get => _bubbleText;
-        private set
-        {
-            if (SetProperty(ref _bubbleText, value)) OnPropertyChanged(nameof(BubbleWidth));
-        }
-    }
-    public double BubbleWidth
-    {
-        get
-        {
-            if (IsThinking) return 200;
-            if (BubbleText.Length <= 18) return 230;
-            return BubbleText.Length <= 60 ? 300 : 370;
-        }
+        private set => SetProperty(ref _bubbleText, value);
     }
     public bool IsInputOpen
     {
@@ -119,10 +107,7 @@ public sealed class PetViewModel : ObservableObject, IDisposable
     public bool IsThinking
     {
         get => _isThinking;
-        private set
-        {
-            if (SetProperty(ref _isThinking, value)) OnPropertyChanged(nameof(BubbleWidth));
-        }
+        private set => SetProperty(ref _isThinking, value);
     }
     public bool HasGift => _pendingCelebration is not null && !IsBusy && !IsInputOpen && !_openingGift && !_presentationSuppressed;
     public AsyncRelayCommand OpenGiftCommand { get; }

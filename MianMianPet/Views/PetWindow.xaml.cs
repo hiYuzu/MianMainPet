@@ -340,7 +340,7 @@ public partial class PetWindow : Window
         BubbleControl.MaxWidth = Math.Max(120, workArea.Width - 24);
         var maximumHeight = Math.Max(120, workArea.Height - 24);
         BubbleControl.SetMaximumHeight(maximumHeight);
-        var width = BubbleControl.ActualWidth > 0 ? BubbleControl.ActualWidth : 370;
+        var width = BubbleControl.ActualWidth > 0 ? BubbleControl.ActualWidth : BubbleControl.Width;
         var height = Math.Clamp(BubbleControl.ActualHeight, 80, maximumHeight);
         ScreenPlacementHelper.PlacePopup(this, BubblePopup, width, height);
         PopupWindowHelper.RefreshPosition(this, BubblePopup);
@@ -413,6 +413,7 @@ public partial class PetWindow : Window
         if (PlayPopup.IsOpen) PlayPopup_OnOpened(this, EventArgs.Empty);
         if (_inputWindow is not null && _viewModel.IsInputOpen)
         {
+            _inputWindow.MaxWidth = Math.Max(120, ScreenPlacementHelper.GetWorkingAreaSize(this).Width - 16);
             ScreenPlacementHelper.PlaceFloatingWindow(this, _inputWindow);
         }
     }
@@ -470,8 +471,6 @@ public partial class PetWindow : Window
         if (e.NewValue is false)
         {
             _stateController.SetSuspended(true);
-            PlayPopup.PopupAnimation = PopupAnimation.None;
-            BubblePopup.PopupAnimation = PopupAnimation.None;
             _viewModel.SetWindowHidden(true);
             _isPointerDown = false;
             _didDrag = false;
@@ -492,8 +491,6 @@ public partial class PetWindow : Window
             _viewModel.SetWindowHidden(false);
             _fullScreenTimer.Start();
             if (RefreshFullScreenSuppression()) return;
-            PlayPopup.PopupAnimation = PopupAnimation.Fade;
-            BubblePopup.PopupAnimation = PopupAnimation.Fade;
             _stateController.SetSuspended(false);
             UpdateDayPhase();
             _dayPhaseTimer.Start();

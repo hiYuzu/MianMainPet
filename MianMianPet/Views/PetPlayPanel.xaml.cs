@@ -4,130 +4,146 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using MianMianPet.Animation;
-using MianMianPet.Models;
 
 namespace MianMianPet.Views;
 
 public partial class PetPlayPanel : UserControl
 {
-    private Button[] Clouds => [CloudOne, CloudTwo, CloudThree];
+    private readonly Button[] _clouds;
     private TranslateTransform RevealTranslate => (TranslateTransform)RevealPet.RenderTransform;
-    private bool _cuddling;
+    private Point? _lastCuddleTarget;
+    private int _peekingCloud = -1;
 
-    public PetPlayPanel() => InitializeComponent();
+    public PetPlayPanel()
+    {
+        InitializeComponent();
+        _clouds = [CloudOne, CloudTwo, CloudThree];
+    }
 
     internal event EventHandler<int>? CloudChosen;
 
-    internal void ShowWalking()
+    internal void ShowSpeech(string message, long visibleMilliseconds)
     {
-        Reset();
-        GameStage.Visibility = Visibility.Collapsed;
-        WalkContent.Visibility = Visibility.Visible;
-        TitleText.Text = "散步";
-        HintText.Text = "去云边走走，很快就回来～";
-        CountdownText.Text = "散步中";
-        TreasureIcon.Data = Geometry.Parse(WalkTreasures.All[4].Shape);
-        TreasureIcon.Fill = new SolidColorBrush(Color.FromRgb(255, 240, 247));
-        TreasureName.Text = "绵绵出门啦";
-        EncounterText.Text = "沿着软软的云，找一点小惊喜……";
-    }
-
-    internal void ShowTreasure(WalkTreasure treasure)
-    {
-        HintText.Text = "我回来啦！看看今天捡到了什么。";
-        CountdownText.Text = "带回来啦";
-        TreasureIcon.Data = Geometry.Parse(treasure.Shape);
-        TreasureIcon.Fill = (Brush)new BrushConverter().ConvertFromString(treasure.Color)!;
-        TreasureName.Text = treasure.Name;
-        EncounterText.Text = treasure.Encounter;
-    }
-
-    internal void ShowHiding()
-    {
-        Reset();
-        GameStage.Visibility = Visibility.Visible;
-        WalkContent.Visibility = Visibility.Collapsed;
-        TitleText.Text = "捉迷藏";
-        HintText.Text = "藏进软软的云里，快来找我呀。";
-        CountdownText.Text = "10s";
-    }
-
-    internal void UpdateHiding(PetPlaySession session, long now)
-    {
-        CountdownText.Text = $"{session.SecondsLeft(now)}s";
-        for (var i = 0; i < Clouds.Length; i++)
+        const int fadeMilliseconds = 230;
+        CloudScene.Visibility = Visibility.Collapsed;
+        SpeechText.Text = message;
+        Speech.Visibility = Visibility.Visible;
+        SpeechContent.BeginAnimation(OpacityProperty, null);
+        SpeechContent.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(fadeMilliseconds))
         {
-            var button = Clouds[i];
-            button.ApplyTemplate();
-            if (button.Template.FindName("PeekEars", button) is UIElement ears)
-                ears.Visibility = i == session.HiddenCloud && session.IsPeeking(now) ? Visibility.Visible : Visibility.Hidden;
+            BeginTime = TimeSpan.FromMilliseconds(visibleMilliseconds - fadeMilliseconds)
+        });
+    }
+
+    internal void SetSpeechSide(bool isRightOfPet)
+    {
+        SpeechPuffs.HorizontalAlignment = isRightOfPet ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+        PuffDirection.ScaleX = isRightOfPet ? 1 : -1;
+    }
+
+    internal void ShowClouds()
+    {
+        Speech.Visibility = Visibility.Collapsed;
+        SpeechContent.BeginAnimation(OpacityProperty, null);
+        CloudScene.Visibility = Visibility.Visible;
+    }
+
+    internal void UpdateHiding(PetPlaySession session, long now) =>
+        SetPeekingCloud(session.IsPeeking(now) ? session.HiddenCloud : -1);
+
+    private void SetPeekingCloud(int cloud)
+    {
+        if (_peekingCloud == cloud) return;
+        _peekingCloud = cloud;
+        for (var i = 0; i < _clouds.Length; i++)
+        {
+            var button = _clouds[i];
+            if (button.Template?.FindName("PeekEars", button) is UIElement ears)
+                ears.Visibility = i == cloud ? Visibility.Visible : Visibility.Hidden;
         }
     }
 
     internal void ShowWrongCloud(int index)
     {
-        HintText.Text = "这朵只有软软的云，再试试～";
-        var button = Clouds[index];
-        if (button.Template.FindName("CloudBody", button) is FrameworkElement body)
+        var button = _clouds[index];
+        if (button.Template?.FindName("CloudBody", button) is not FrameworkElement body ||
+            body.RenderTransform is not TranslateTransform movement) return;
+
+        if (movement.IsFrozen)
         {
-            var shake = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(240) };
-            shake.KeyFrames.Add(new EasingDoubleKeyFrame(-3, KeyTime.FromPercent(0.25)));
-            shake.KeyFrames.Add(new EasingDoubleKeyFrame(3, KeyTime.FromPercent(0.65)));
-            shake.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(1)));
-            var movement = new TranslateTransform();
+            movement = movement.Clone();
             body.RenderTransform = movement;
-            movement.BeginAnimation(TranslateTransform.XProperty, shake);
         }
+
+        var shake = new DoubleAnimationUsingKeyFrames
+        {
+            Duration = TimeSpan.FromMilliseconds(260),
+            FillBehavior = FillBehavior.Stop
+        };
+        shake.KeyFrames.Add(new EasingDoubleKeyFrame(-4, KeyTime.FromPercent(0.22)));
+        shake.KeyFrames.Add(new EasingDoubleKeyFrame(3, KeyTime.FromPercent(0.55)));
+        shake.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(1),
+            new CubicEase { EasingMode = EasingMode.EaseOut }));
+        movement.BeginAnimation(TranslateTransform.XProperty, shake);
     }
 
     internal void ShowReveal(int cloud, bool found)
     {
-        foreach (var button in Clouds)
-        {
-            button.IsEnabled = false;
-            if (button.Template.FindName("PeekEars", button) is UIElement ears) ears.Visibility = Visibility.Hidden;
-        }
-        CountdownText.Text = string.Empty;
-        HintText.Text = found ? "找到啦！蹦出来蹭蹭你 ♡" : "时间到～我在这里呀，下次再一起玩。";
-        RevealPet.Visibility = Visibility.Visible;
-        Canvas.SetLeft(RevealPet, cloud * 104);
-        Canvas.SetTop(RevealPet, 12);
+        foreach (var button in _clouds) button.IsEnabled = false;
+        SetPeekingCloud(-1);
+        var chosen = _clouds[cloud];
+        Canvas.SetLeft(RevealPet, Canvas.GetLeft(chosen) + (chosen.Width - RevealPet.Width) / 2);
+        Canvas.SetTop(RevealPet, Canvas.GetTop(chosen) - 49);
         Panel.SetZIndex(RevealPet, found ? 1 : -1);
-        RevealTranslate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(40, 0, TimeSpan.FromMilliseconds(420))
+        RevealPet.Visibility = Visibility.Visible;
+        RevealPet.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220))
         {
-            EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = found ? 0.6 : 0 }
+            FillBehavior = FillBehavior.Stop
         });
-        RevealPet.PlayWake();
+        RevealTranslate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(30, 0, TimeSpan.FromMilliseconds(440))
+        {
+            FillBehavior = FillBehavior.Stop,
+            EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = found ? 0.4 : 0 }
+        });
+        GameStage.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(280))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(PetPlaySession.RevealMilliseconds - 280)
+        });
     }
 
-    internal void CuddleMouse(int cloud)
+    internal void CuddleMouse()
     {
-        if (!_cuddling)
-        {
-            _cuddling = true;
-            RevealPet.ApplyState(PetState.Petted);
-        }
         var mouse = Mouse.GetPosition(GameStage);
-        var x = Math.Clamp(mouse.X - 24, 0, 210) - cloud * 104;
-        var y = Math.Clamp(mouse.Y - 42, 0, 36) - 12;
-        RevealTranslate.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(x, TimeSpan.FromMilliseconds(180)));
-        RevealTranslate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(y, TimeSpan.FromMilliseconds(180)));
+        if (!new Rect(GameStage.RenderSize).Contains(mouse)) return;
+        var target = new Point(Math.Clamp(mouse.X - 46, 4, Width - RevealPet.Width - 4) - Canvas.GetLeft(RevealPet),
+            Math.Clamp(mouse.Y - 74, 0, 28) - Canvas.GetTop(RevealPet));
+        if (_lastCuddleTarget is Point previous && (target - previous).LengthSquared < 1) return;
+        if (_lastCuddleTarget is null) RevealPet.ApplyState(PetState.Petted);
+        _lastCuddleTarget = target;
+        var duration = TimeSpan.FromMilliseconds(180);
+        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+        RevealTranslate.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(target.X, duration) { EasingFunction = easing });
+        RevealTranslate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(target.Y, duration) { EasingFunction = easing });
     }
 
     internal void Reset()
     {
-        CountdownText.Text = string.Empty;
+        Speech.Visibility = Visibility.Collapsed;
+        SpeechContent.BeginAnimation(OpacityProperty, null);
+        CloudScene.Visibility = Visibility.Collapsed;
+        GameStage.BeginAnimation(OpacityProperty, null);
         RevealPet.Visibility = Visibility.Collapsed;
         RevealPet.ApplyState(PetState.Idle);
+        RevealPet.BeginAnimation(OpacityProperty, null);
         RevealTranslate.BeginAnimation(TranslateTransform.XProperty, null);
         RevealTranslate.BeginAnimation(TranslateTransform.YProperty, null);
-        _cuddling = false;
-        foreach (var button in Clouds)
+        _lastCuddleTarget = null;
+        SetPeekingCloud(-1);
+        foreach (var button in _clouds)
         {
             button.IsEnabled = true;
-            button.ApplyTemplate();
-            if (button.Template.FindName("PeekEars", button) is UIElement ears) ears.Visibility = Visibility.Hidden;
-            if (button.Template.FindName("CloudBody", button) is FrameworkElement body && body.RenderTransform is TranslateTransform movement)
+            if (button.Template?.FindName("CloudBody", button) is FrameworkElement body &&
+                body.RenderTransform is TranslateTransform { IsFrozen: false } movement)
                 movement.BeginAnimation(TranslateTransform.XProperty, null);
         }
     }

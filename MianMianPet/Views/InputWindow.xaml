@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:MianMianPet.Views"
         Title="和绵绵说话"
-        Width="340"
+        Width="368"
         SizeToContent="Height"
         WindowStyle="None"
         ResizeMode="NoResize"

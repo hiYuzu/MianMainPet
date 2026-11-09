@@ -47,17 +47,18 @@
                 </ContextMenu>
             </Border.ContextMenu>
             <Viewbox Stretch="Uniform">
+                <Viewbox.RenderTransform><TranslateTransform x:Name="PlayTravel" /></Viewbox.RenderTransform>
                 <local:PetVisual x:Name="PetArtwork" />
             </Viewbox>
         </Border>
 
         <Border HorizontalAlignment="Center" VerticalAlignment="Top"
                 Margin="0,4,0,0" Padding="10,5"
-                CornerRadius="12" Background="#EFFFF9F0"
-                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                CornerRadius="12" Background="#FBFFFAFD"
+                BorderBrush="{StaticResource CloudBorderBrush}" BorderThickness="1"
                 IsHitTestVisible="False"
                 Visibility="{Binding IsHoverHintVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
-            <TextBlock Text="摸摸头，聊聊天" FontSize="12" />
+            <TextBlock Text="摸摸头，聊聊天" FontSize="11" Foreground="{StaticResource CloudInkBrush}" />
         </Border>
 
         <Button Width="44" Height="34" Margin="0,24,5,0"
@@ -86,7 +87,6 @@
         <Popup x:Name="BubblePopup"
                PlacementTarget="{Binding ElementName=PetRoot}"
                AllowsTransparency="True"
-               PopupAnimation="Fade"
                StaysOpen="True"
                IsOpen="{Binding IsBubbleOpen, Mode=OneWay}"
                Opened="BubblePopup_OnOpened">
@@ -97,7 +97,7 @@
         </Popup>
 
         <Popup x:Name="PlayPopup" PlacementTarget="{Binding ElementName=PetRoot}"
-               AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="True"
+               AllowsTransparency="True" StaysOpen="True"
                Opened="PlayPopup_OnOpened">
             <local:PetPlayPanel x:Name="PlayPanel" />
         </Popup>

@@ -6,6 +6,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using System.Windows.Threading;
 using MianMianPet.Animation;
 using MianMianPet.Infrastructure;
@@ -35,7 +36,17 @@ internal static class WindowRegressionTests
             ActivateForegroundWindow(foreground);
             Call(window, "RefreshFullScreenSuppression");
             check(!window.FullScreenDetector(), "window regressions use a controlled non-fullscreen environment");
+            var artwork = Field<PetVisual>(window, "PetArtwork");
+            var breath = (ScaleTransform)artwork.FindName("BreathScale");
+            var reaction = (ScaleTransform)artwork.FindName("ReactionScale");
+            var pose = (RotateTransform)artwork.FindName("StateRotate");
+            state.SetState(PetState.Thinking);
+            state.PlayClickReaction();
+            check(breath.HasAnimatedProperties && reaction.HasAnimatedProperties && pose.HasAnimatedProperties,
+                "breathing, thinking and click feedback animate independent transforms");
             state.SetState(PetState.Speaking);
+            check(((ScaleTransform)artwork.FindName("MouthScale")).HasAnimatedProperties && breath.HasAnimatedProperties,
+                "speaking animates the mouth while breathing continues");
             state.SetSuspended(true);
             state.SetSuspended(false);
             check(state.CurrentState == PetState.Speaking, "resuming animation preserves an ongoing speaking state");
@@ -62,6 +73,29 @@ internal static class WindowRegressionTests
                 Math.Abs((after.Y - before.Y) - (ownerAfter.Y - ownerBefore.Y)) <= 2,
                 "open bubble follows owner movement without changing its text or size");
 
+            var bubbleWidth = bubbleControl.ActualWidth;
+            var dot = (Ellipse)bubbleControl.FindName("DotOne");
+            SetProperty(viewModel, nameof(PetViewModel.IsThinking), true);
+            await Task.Delay(240);
+            check(dot.IsVisible && dot.HasAnimatedProperties && bubbleControl.ActualWidth == bubbleWidth,
+                "thinking uses the same card width and starts its pulse");
+            Program.Render(bubbleControl, "chat-thinking");
+            SetProperty(viewModel, nameof(PetViewModel.BubbleText),
+                string.Join("\n\n", Enumerable.Repeat("傍晚的风软软的，绵绵想带你去云边看一看。回来时还可以一起数星星。", 5)));
+            SetProperty(viewModel, nameof(PetViewModel.IsThinking), false);
+            await SettleAsync();
+            var scroller = (ScrollViewer)bubbleControl.FindName("MessageScroller");
+            check(!dot.IsVisible && !dot.HasAnimatedProperties && bubbleControl.ActualWidth == bubbleWidth && scroller.ScrollableHeight > 0,
+                "long replies scroll in place and stop the thinking pulse");
+            check(scroller.ActualHeight >= Math.Min(120, scroller.MaxHeight),
+                $"long reply expands the visible reading area ({scroller.ActualHeight} of {scroller.MaxHeight} DIPs)");
+            Program.Render(bubbleControl, "chat-reply");
+            var scrollbar = (ScrollBar)scroller.Template.FindName("PART_VerticalScrollBar", scroller);
+            var track = (Track)scrollbar.Template.FindName("PART_Track", scrollbar);
+            ((RoutedCommand)track.IncreaseRepeatButton.Command).Execute(null, track.IncreaseRepeatButton);
+            await SettleAsync();
+            check(scroller.VerticalOffset > 0, "styled scrollbar still pages through the long reply");
+
             settings.Current.AlwaysOnTop = false;
             window.ApplySettings();
             await SettleAsync();
@@ -71,6 +105,13 @@ internal static class WindowRegressionTests
             await SettleAsync();
             check(IsTopmost(bubble), "enabling always-on-top restores the bubble native topmost style");
             SetProperty(viewModel, nameof(PetViewModel.IsBubbleOpen), false);
+            viewModel.ToggleInput();
+            var inputWindow = Field<InputWindow>(window, "_inputWindow");
+            viewModel.InputText = "今天我们去哪里散步？";
+            await Task.Delay(250);
+            Program.Render((InputPanel)inputWindow.Content, "chat-input");
+            viewModel.HideInput();
+            viewModel.InputText = string.Empty;
             settings.Current.AlwaysOnTop = false;
             window.ApplySettings();
             Call(window, "StartPlay", PetPlayKind.Walk);

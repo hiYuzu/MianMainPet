@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using MianMianPet.Animation;
@@ -10,6 +11,7 @@ namespace MianMianPet.Views;
 
 public partial class PetWindow
 {
+    private const int WalkExitMilliseconds = 1050;
     private readonly PetPlaySession _play = new();
     private DispatcherTimer _playTimer = null!;
     private DispatcherTimer _playFrameTimer = null!;
@@ -94,7 +96,7 @@ public partial class PetWindow
 
     private void StartPlay(PetPlayKind kind)
     {
-        if (RefreshFullScreenSuppression()) return;
+        if (RefreshFullScreenSuppression() || _play.IsActive) return;
         _hasPlayed = true;
         _ambientTimer.Stop();
         _sleepTimer.Stop();
@@ -106,16 +108,13 @@ public partial class PetWindow
         if (kind == PetPlayKind.Walk)
         {
             _play.StartWalk(WalkTreasures.All[_random.Next(WalkTreasures.All.Count)], now);
-            PlayPanel.ShowWalking();
         }
         else
         {
             _play.StartHiding(_random.Next(3), now);
-            PlayPanel.ShowHiding();
         }
         PetHitArea.IsHitTestVisible = false;
-        PetHitArea.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(320)));
-        PlayPopup.IsOpen = true;
+        RenderPlayTransition();
         _playFrameTimer.Start();
     }
 
@@ -126,9 +125,12 @@ public partial class PetWindow
         var now = Environment.TickCount64;
         _play.Advance(now);
         if (before != _play.Phase) RenderPlayTransition();
+        if (_play.Phase == PetPlayPhase.Walking && PetHitArea.Visibility == Visibility.Visible &&
+            _play.Deadline - now <= PetPlaySession.WalkMilliseconds - WalkExitMilliseconds)
+            HidePlayPet();
         if (_play.Phase == PetPlayPhase.Hiding) PlayPanel.UpdateHiding(_play, now);
         if (_play.Phase == PetPlayPhase.Found && _play.Deadline - now < PetPlaySession.RevealMilliseconds - 450)
-            PlayPanel.CuddleMouse(_play.HiddenCloud);
+            PlayPanel.CuddleMouse();
     }
 
     private void PlayPanel_OnCloudChosen(object? sender, int cloud)
@@ -145,12 +147,45 @@ public partial class PetWindow
     {
         switch (_play.Phase)
         {
+            case PetPlayPhase.WalkGreeting:
+                PlayPanel.ShowSpeech("我去云边走走，等我一下～", PetPlaySession.GreetingMilliseconds);
+                PlayPopup.IsOpen = true;
+                break;
+            case PetPlayPhase.Walking:
+                PlayPopup.IsOpen = false;
+                PetArtwork.SetWalking(true);
+                PlayTravel.BeginAnimation(TranslateTransform.XProperty,
+                    new DoubleAnimation(0, -34, TimeSpan.FromMilliseconds(WalkExitMilliseconds))
+                    {
+                        AccelerationRatio = 0.18
+                    });
+                FadePlayPetOut(delay: 340, duration: WalkExitMilliseconds - 340);
+                break;
+            case PetPlayPhase.Returning:
+                RestorePetAfterPlay(acceptInput: false);
+                var arrival = TimeSpan.FromMilliseconds(PetPlaySession.ReturnMilliseconds - 40);
+                FadePlayPetIn(arrival);
+                PlayTravel.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(18, 0, arrival)
+                {
+                    FillBehavior = FillBehavior.Stop,
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                });
+                break;
             case PetPlayPhase.ShowingTreasure:
                 PetArtwork.SetTreasure(_play.Treasure);
-                RestorePetAfterPlay();
-                _stateController.PlayWakeReaction();
-                PlayPanel.ShowTreasure(_play.Treasure!);
+                PetHitArea.IsHitTestVisible = true;
+                PlayPanel.ShowSpeech(_play.Treasure!.Encounter, PetPlaySession.TreasureMilliseconds);
+                PlayPopup.IsOpen = true;
                 SavePlayOutcome("walk:returned", PetPlayKind.Walk);
+                break;
+            case PetPlayPhase.HideGreeting:
+                PlayPanel.ShowSpeech("我去躲起来啦，来找我呀～", PetPlaySession.GreetingMilliseconds);
+                PlayPopup.IsOpen = true;
+                FadePlayPetOut(delay: PetPlaySession.GreetingMilliseconds - 340, duration: 340);
+                break;
+            case PetPlayPhase.Hiding:
+                HidePlayPet();
+                PlayPanel.ShowClouds();
                 break;
             case PetPlayPhase.Found:
             case PetPlayPhase.TimedOut:
@@ -159,7 +194,9 @@ public partial class PetWindow
                 SavePlayOutcome(found ? "hide:found" : "hide:timeout", PetPlayKind.HideAndSeek);
                 break;
             case PetPlayPhase.Idle:
+                var wasHidden = PetHitArea.Visibility == Visibility.Hidden;
                 CancelPlay();
+                if (wasHidden) FadePlayPetIn(TimeSpan.FromMilliseconds(460));
                 break;
         }
     }
@@ -178,11 +215,44 @@ public partial class PetWindow
         }
     }
 
-    private void RestorePetAfterPlay()
+    private void FadePlayPetOut(long delay, int duration)
     {
+        PetHitArea.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(duration))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(delay),
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+        });
+    }
+
+    private void FadePlayPetIn(TimeSpan duration)
+    {
+        PetHitArea.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, duration)
+        {
+            FillBehavior = FillBehavior.Stop,
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+        });
+    }
+
+    private void HidePlayPet()
+    {
+        _stateController.SetSuspended(true);
+        PetHitArea.Visibility = Visibility.Hidden;
+    }
+
+    private void RestorePetAfterPlay(bool acceptInput = true)
+    {
+        var wasHidden = PetHitArea.Visibility == Visibility.Hidden;
+        PetArtwork.SetWalking(false);
         PetHitArea.BeginAnimation(OpacityProperty, null);
+        PlayTravel.BeginAnimation(TranslateTransform.XProperty, null);
         PetHitArea.Opacity = 1;
-        PetHitArea.IsHitTestVisible = true;
+        PetHitArea.Visibility = Visibility.Visible;
+        PetHitArea.IsHitTestVisible = acceptInput;
+        if (wasHidden && IsVisible && !_isFullScreenSuppressed)
+        {
+            _stateController.SetSuspended(false);
+            UpdateDayPhase();
+        }
     }
 
     private void CancelPlay(bool resumeIdle = true)
@@ -206,6 +276,7 @@ public partial class PetWindow
     private void PlayPopup_OnOpened(object? sender, EventArgs e)
     {
         ScreenPlacementHelper.PlacePopup(this, PlayPopup, PlayPanel.Width, PlayPanel.Height);
+        PlayPanel.SetSpeechSide(PlayPopup.HorizontalOffset >= 0);
         PopupWindowHelper.RefreshPosition(this, PlayPopup);
     }
 

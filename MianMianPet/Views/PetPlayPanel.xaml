@@ -2,43 +2,89 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:MianMianPet.Views"
-             Width="368" Height="275" Focusable="False"
-             FontFamily="Microsoft YaHei UI" UseLayoutRounding="True">
+             Width="320" Height="136" Focusable="False">
     <UserControl.Resources>
+        <Style x:Key="CloudSilhouette" TargetType="Path">
+            <Setter Property="Fill">
+                <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#FFFFFEFC" Offset="0" />
+                        <GradientStop Color="#FFF7F1FA" Offset="1" />
+                    </LinearGradientBrush>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Stroke" Value="#E0CBD9" />
+            <Setter Property="StrokeThickness" Value="1.2" />
+            <Setter Property="Effect">
+                <Setter.Value><DropShadowEffect Color="#6D506C" BlurRadius="11" ShadowDepth="2" Opacity="0.23" /></Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="CloudChoice" TargetType="Button">
-            <Setter Property="Width" Value="102" />
-            <Setter Property="Height" Value="88" />
+            <Setter Property="Width" Value="96" />
+            <Setter Property="Height" Value="66" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Background" Value="Transparent" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.6" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Grid x:Name="CloudBody" Background="Transparent">
-                            <Ellipse Width="66" Height="8" Fill="#EBDFE7" Opacity="0.6"
-                                     VerticalAlignment="Bottom" Margin="0,0,0,12" />
-                            <Path x:Name="PeekEars" Visibility="Hidden"
-                                  Data="M38,32 C20,26 22,3 29,6 C36,9 37,22 41,27 M60,31 C75,22 76,2 69,6 C62,10 61,21 57,26"
-                                  Fill="#F2BECE" Stroke="#CA91A6" StrokeThickness="1.4" StrokeLineJoin="Round" />
-                            <Path x:Name="CloudShape"
-                                  Data="M20,68 C1,68 0,44 16,40 C13,22 35,16 46,29 C57,11 83,23 82,40 C102,41 102,68 82,68Z"
-                                  Fill="#FFFFFE" Stroke="#E6D4DF" StrokeThickness="1.4" StrokeLineJoin="Round" />
-                            <Border Width="22" Height="22" CornerRadius="11" Background="#FAF0F5"
-                                    HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,39,0,0">
-                                <TextBlock Text="{TemplateBinding Content}" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                           Foreground="#9B7186" FontSize="11" FontWeight="SemiBold" />
-                            </Border>
-                        </Grid>
+                        <Canvas x:Name="CloudBody">
+                            <Canvas.RenderTransform><TranslateTransform /></Canvas.RenderTransform>
+                            <Canvas x:Name="PeekEars" Visibility="Hidden" IsHitTestVisible="False">
+                                <Canvas.RenderTransform><TranslateTransform /></Canvas.RenderTransform>
+                                <Path Data="M35,19 C24,9 14,13 18,22 C22,27 29,25 35,22 M60,19 C70,9 82,13 78,22 C74,27 66,25 60,22"
+                                      Fill="#F2BEC8" Stroke="#C48C9C" StrokeThickness="1.2" />
+                                <Path Data="M32,26 C26,22 29,14 34,13 C33,6 42,2 47,8 C53,3 61,7 61,13 C68,13 71,21 65,26Z"
+                                      Fill="#FFF8F1" Stroke="#C9A498" StrokeThickness="1.2" />
+                            </Canvas>
+                            <Path x:Name="CloudShape" Style="{StaticResource CloudSilhouette}"
+                                  Data="M18,55 C6,55 1,47 4,38 C6,32 11,29 17,28 C15,17 26,12 36,16 C40,5 57,5 63,16 C74,13 83,20 82,29 C91,31 95,38 93,45 C91,52 84,57 75,56 C61,60 43,57 34,57 C28,58 23,57 18,55Z" />
+                        </Canvas>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="CloudShape" Property="Fill" Value="#FFF3F8" />
-                                <Setter TargetName="CloudShape" Property="Stroke" Value="#D6A0B6" />
+                                <Setter TargetName="CloudShape" Property="Stroke" Value="#BB8AA9" />
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="CloudBody"
+                                                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                             To="-3" Duration="0:0:0.16">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard FillBehavior="Stop">
+                                            <DoubleAnimation Storyboard.TargetName="CloudBody"
+                                                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                             To="0" Duration="0:0:0.18" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="CloudShape" Property="Stroke" Value="#BC7896" />
+                                <Setter TargetName="CloudShape" Property="Stroke" Value="#A77599" />
+                                <Setter TargetName="CloudShape" Property="StrokeThickness" Value="2" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="CloudShape" Property="Fill" Value="#F8E3ED" />
+                                <Setter TargetName="CloudShape" Property="Fill" Value="#F5E5F0" />
+                            </Trigger>
+                            <Trigger SourceName="PeekEars" Property="IsVisible" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard Name="Peek">
+                                        <Storyboard FillBehavior="Stop">
+                                            <DoubleAnimation Storyboard.TargetName="PeekEars"
+                                                             Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                             From="11" To="0" Duration="0:0:0.20">
+                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                                            </DoubleAnimation>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions><RemoveStoryboard BeginStoryboardName="Peek" /></Trigger.ExitActions>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -46,82 +92,41 @@
             </Setter>
         </Style>
     </UserControl.Resources>
-    <Border x:Name="CardShell" Margin="12" Padding="16" CornerRadius="26"
-            Background="#FFFFFDFE" BorderBrush="#EEDFE7" BorderThickness="1">
-        <Border.Effect>
-            <DropShadowEffect Color="#785769" Opacity="0.13" BlurRadius="16" ShadowDepth="3" />
-        </Border.Effect>
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="54" />
-                <RowDefinition Height="12" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock x:Name="TitleText" FontSize="17" FontWeight="SemiBold" Foreground="#654E62" />
-                    <TextBlock x:Name="HintText" Margin="0,7,0,0" FontSize="11" Foreground="#987F90" TextWrapping="Wrap" />
-                </StackPanel>
-                <Border Grid.Column="1" x:Name="CountdownBadge" CornerRadius="12" Padding="9,5" Margin="8,0,0,0"
-                        Background="#F8EAF1" VerticalAlignment="Top">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding Text, ElementName=CountdownText}" Value="">
-                                    <Setter Property="Visibility" Value="Collapsed" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                    <TextBlock x:Name="CountdownText" FontSize="11" FontWeight="SemiBold" Foreground="#AA6E8B" />
-                </Border>
+
+    <Grid>
+        <Grid x:Name="Speech" Width="286" Height="122" Visibility="Collapsed"
+              Style="{StaticResource FloatingSurfaceMotion}" IsHitTestVisible="False">
+            <Grid x:Name="SpeechContent">
+                <Path Style="{StaticResource CloudSilhouette}"
+                      Data="M47,94 C28,96 14,87 14,74 C3,65 12,50 28,46 C24,31 40,22 58,25 C70,10 96,8 113,18 C128,4 151,4 168,18 C189,8 215,13 227,29 C248,23 266,36 264,52 C279,58 286,71 277,82 C267,94 252,96 231,94 C185,99 88,98 47,94Z" />
+                <Canvas x:Name="SpeechPuffs" Width="45" Height="26" Margin="48,0,48,0"
+                        HorizontalAlignment="Left" VerticalAlignment="Bottom" RenderTransformOrigin="0.5,0.5">
+                    <Canvas.RenderTransform><ScaleTransform x:Name="PuffDirection" /></Canvas.RenderTransform>
+                    <Ellipse Canvas.Left="24" Canvas.Top="3" Width="14" Height="9" Fill="#FFFDFB" Stroke="#E0CBD9" />
+                    <Ellipse Canvas.Left="11" Canvas.Top="15" Width="8" Height="6" Fill="#FFFDFB" Stroke="#E0CBD9" />
+                </Canvas>
+                <TextBlock x:Name="SpeechText" Margin="34,25,34,34" VerticalAlignment="Center"
+                           FontSize="14" LineHeight="22" TextWrapping="Wrap" TextAlignment="Center"
+                           Foreground="{StaticResource CloudInkBrush}" />
             </Grid>
-            <Border Grid.Row="2" CornerRadius="20" BorderBrush="#F1E6ED" BorderThickness="1">
-                <Border.Background>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                        <GradientStop Color="#FFF5F8" Offset="0" />
-                        <GradientStop Color="#F4F1FC" Offset="1" />
-                    </LinearGradientBrush>
-                </Border.Background>
-                <Grid>
-                    <Canvas x:Name="GameStage" Width="310" Height="144" ClipToBounds="True">
-                        <Ellipse Width="4" Height="4" Fill="#E5CBDB" Canvas.Left="25" Canvas.Top="28" />
-                        <Path Data="M0,5 L10,5 M5,0 L5,10" Stroke="#DECBE6" StrokeThickness="1.6"
-                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" Canvas.Left="267" Canvas.Top="20" />
-                        <local:PetVisual x:Name="RevealPet" Width="100" Height="100" Visibility="Collapsed" IsHitTestVisible="False">
-                            <local:PetVisual.RenderTransform><TranslateTransform /></local:PetVisual.RenderTransform>
-                        </local:PetVisual>
-                        <Button x:Name="CloudOne" Canvas.Left="0" Canvas.Top="43" Style="{StaticResource CloudChoice}"
-                                Tag="0" Content="1" Click="Cloud_OnClick" AutomationProperties.Name="第一朵云" />
-                        <Button x:Name="CloudTwo" Canvas.Left="104" Canvas.Top="43" Style="{StaticResource CloudChoice}"
-                                Tag="1" Content="2" Click="Cloud_OnClick" AutomationProperties.Name="第二朵云" />
-                        <Button x:Name="CloudThree" Canvas.Left="208" Canvas.Top="43" Style="{StaticResource CloudChoice}"
-                                Tag="2" Content="3" Click="Cloud_OnClick" AutomationProperties.Name="第三朵云" />
-                    </Canvas>
-                    <Grid x:Name="WalkContent" Margin="17,16">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="74" />
-                            <ColumnDefinition Width="14" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Border Width="74" Height="78" CornerRadius="24" Background="#FFFFFDFE"
-                                BorderBrush="#F0E1EA" BorderThickness="1" VerticalAlignment="Center">
-                            <Path x:Name="TreasureIcon" Width="44" Height="44" Stretch="Uniform"
-                                  Stroke="#BE92A1" StrokeThickness="1.3" StrokeLineJoin="Round" />
-                        </Border>
-                        <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                            <TextBlock Text="云边的小惊喜" FontSize="10" Foreground="#AD8C9F" Margin="0,0,0,7" />
-                            <TextBlock x:Name="TreasureName" FontSize="15" FontWeight="SemiBold" Foreground="#7D586F" />
-                            <TextBlock x:Name="EncounterText" Margin="0,7,0,0" TextWrapping="Wrap"
-                                       FontSize="11" LineHeight="19" Foreground="#927B8B" />
-                        </StackPanel>
-                    </Grid>
-                </Grid>
-            </Border>
         </Grid>
-    </Border>
+
+        <Grid x:Name="CloudScene" Visibility="Collapsed" Style="{StaticResource FloatingSurfaceMotion}">
+            <Canvas x:Name="GameStage">
+                <local:PetVisual x:Name="RevealPet" Width="100" Height="100" Visibility="Collapsed">
+                    <local:PetVisual.RenderTransform><TranslateTransform /></local:PetVisual.RenderTransform>
+                </local:PetVisual>
+                <Button x:Name="CloudOne" Canvas.Left="9" Canvas.Top="57" Style="{StaticResource CloudChoice}"
+                        Tag="0" Click="Cloud_OnClick" AutomationProperties.Name="第一朵云">
+                    <Button.RenderTransform><RotateTransform Angle="-4" /></Button.RenderTransform>
+                </Button>
+                <Button x:Name="CloudTwo" Canvas.Left="111" Canvas.Top="49" Style="{StaticResource CloudChoice}"
+                        Tag="1" Click="Cloud_OnClick" AutomationProperties.Name="第二朵云" />
+                <Button x:Name="CloudThree" Canvas.Left="214" Canvas.Top="58" Style="{StaticResource CloudChoice}"
+                        Tag="2" Click="Cloud_OnClick" AutomationProperties.Name="第三朵云">
+                    <Button.RenderTransform><RotateTransform Angle="4" /></Button.RenderTransform>
+                </Button>
+            </Canvas>
+        </Grid>
+    </Grid>
 </UserControl>

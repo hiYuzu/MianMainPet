@@ -36,9 +36,8 @@ public sealed class PetStateController : IDisposable
 
         CurrentState = state;
         _pettingTimer.Stop();
-        if (_suspended) return;
         _visual.ApplyState(state);
-        if (state is PetState.Petted) _pettingTimer.Start();
+        if (!_suspended && state is PetState.Petted) _pettingTimer.Start();
     }
 
     public void PlayClickReaction() { if (!_suspended) _visual.PlayClick(); }
@@ -54,7 +53,6 @@ public sealed class PetStateController : IDisposable
         _visual.SetAnimationsSuspended(suspended);
         if (!suspended && !_disposed)
         {
-            _visual.ApplyState(CurrentState);
             if (CurrentState is PetState.Petted) _pettingTimer.Start();
             _blinkTimer.Interval = NextBlinkInterval();
             _blinkTimer.Start();

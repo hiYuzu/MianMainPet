@@ -47,7 +47,8 @@ public partial class App : Application
 
             var persona = new PetPersona(LocalConfig.Current.PersonaPrompt);
             _httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("MianMianPet/2.2.0");
+            var version = typeof(App).Assembly.GetName().Version!.ToString(3);
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd($"MianMianPet/{version}");
             var deepSeekClient = new DeepSeekClient(_httpClient, _settingsService, persona);
             _petViewModel = new PetViewModel(
                 deepSeekClient,

@@ -23,7 +23,7 @@ namespace MianMianPet.Tests;
 // Dependency-free Windows/STA regression runner: dotnet run --project MianMianPet.Tests
 internal static partial class Program
 {
-    private static readonly string Output = Path.GetFullPath(Path.Combine("TestResults", "play-v2.2.0"));
+    private static readonly string Output = Path.GetFullPath(Path.Combine("TestResults", "play-v2.2.1"));
     private static int _assertions;
 
     [STAThread]
@@ -127,19 +127,38 @@ internal static partial class Program
             if (!args.Contains("--play-only"))
                 await WindowRegressionTests.RunAsync(window, viewModel, Check, foreground);
             // Use real WPF routed Click events, real timers and a private SQLite database.
+            var petHitArea = Field<Border>(window, "PetHitArea");
+            var speech = Field<Grid>(panel, "Speech");
+            var clouds = Field<Canvas>(panel, "GameStage");
             Start(window, PetPlayKind.Walk);
-            Check(session.Phase == PetPlayPhase.Walking && popup.IsOpen, "walk opens cloud panel");
-            await Task.Delay(450);
-            Check(Field<Border>(window, "PetHitArea").Opacity == 0, "pet leaves during walk");
-            Render(panel, "walk-away");
-            await WaitUntil(() => session.Phase == PetPlayPhase.ShowingTreasure, 7000,
+            Check(session.Phase == PetPlayPhase.WalkGreeting && popup.IsOpen && speech.IsVisible && petHitArea.IsVisible,
+                "walk starts with a speech cloud while the pet is visible");
+            await Task.Delay(240);
+            Render(panel, "walk-greeting");
+            await WaitUntil(() => session.Phase == PetPlayPhase.Walking);
+            var frontStride = Field<RotateTransform>(artwork, "FrontStride");
+            var backStride = Field<RotateTransform>(artwork, "BackStride");
+            await WaitUntil(() => Math.Abs(frontStride.Angle) > 6, 700);
+            Check(!popup.IsOpen && frontStride.Angle * backStride.Angle < 0, "front and back legs step in opposite directions");
+            Render(window, "walk-step");
+            await WaitUntil(() => !petHitArea.IsVisible);
+            await Task.Delay(80);
+            Check(!frontStride.HasAnimatedProperties && !backStride.HasAnimatedProperties, "walking stops once the pet is out of sight");
+            await WaitUntil(() => session.Phase == PetPlayPhase.Returning);
+            await WaitUntil(() => petHitArea.Opacity is > 0.1 and < 0.9, 700);
+            Check(petHitArea.IsVisible && !popup.IsOpen, "pet fades in before the return speech");
+            Render(window, "walk-reappearing");
+            await WaitUntil(() => session.Phase == PetPlayPhase.ShowingTreasure, diagnostics:
                 () => $"phase={session.Phase}, suppressed={Field<bool>(window, "_isFullScreenSuppressed")}, visible={window.IsVisible}, frameTimer={Field<DispatcherTimer>(window, "_playFrameTimer").IsEnabled}");
             var treasureDeadline = session.Deadline;
-            Check(Field<System.Windows.Shapes.Path>(artwork, "TreasureAdornment").IsVisible, "returned treasure is worn");
+            Check(popup.IsOpen && speech.IsVisible && Field<System.Windows.Shapes.Path>(artwork, "TreasureAdornment").IsVisible,
+                "returned pet wears the treasure and speaks in a cloud");
             Check(await database.GetStateAsync("play.last") == "walk:returned", "walk outcome saved");
             await Task.Delay((int)Math.Max(0, treasureDeadline - Environment.TickCount64 - 1000));
             Check(session.Phase == PetPlayPhase.ShowingTreasure,
                 $"treasure stays visible before its deadline (phase={session.Phase}, remaining={treasureDeadline - Environment.TickCount64}ms, suppressed={Field<bool>(window, "_isFullScreenSuppressed")}, visible={window.IsVisible})");
+            Check(speech.Opacity > 0.99 && Field<Grid>(panel, "SpeechContent").Opacity > 0.99,
+                "return speech fades in after the greeting has faded out");
             // Export after the timing assertion so PNG encoding cannot consume its waiting margin.
             Render(panel, "walk-returned");
             Render(artwork, "treasure-worn");
@@ -150,14 +169,36 @@ internal static partial class Program
 
             Start(window, PetPlayKind.HideAndSeek);
             var hidden = session.HiddenCloud;
-            ClickCloud(panel, (hidden + 1) % 3);
-            Check(session.Phase == PetPlayPhase.Hiding, "wrong cloud keeps game active");
-            await Task.Delay(2300);
+            ClickCloud(panel, hidden);
+            Check(session.Phase == PetPlayPhase.HideGreeting && speech.IsVisible && !clouds.IsVisible,
+                "hide-and-seek announces itself before the choices can be clicked");
+            await Task.Delay(240);
+            Render(panel, "hide-greeting");
+            await WaitUntil(() => session.Phase == PetPlayPhase.Hiding);
+            Check(clouds.IsVisible && !speech.IsVisible && !petHitArea.IsVisible &&
+                Enumerable.Range(0, 3).All(index => Cloud(panel, index).Content is null),
+                "the guessing phase shows three unnumbered clouds with no text");
+            for (var offset = 1; offset <= 2; offset++)
+            {
+                var index = (hidden + offset) % 3;
+                ClickCloud(panel, index);
+                var wrong = Cloud(panel, index);
+                var body = (FrameworkElement)wrong.Template.FindName("CloudBody", wrong);
+                Check(session.Phase == PetPlayPhase.Hiding && body.RenderTransform is TranslateTransform { HasAnimatedProperties: true },
+                    "wrong cloud shakes and keeps the game active");
+            }
             var button = Cloud(panel, hidden);
-            Check(((UIElement)button.Template.FindName("PeekEars", button)).Visibility == Visibility.Visible, "only hidden cloud peeks");
+            await WaitUntil(() => button.Template.FindName("PeekEars", button) is UIElement { IsVisible: true });
+            await Task.Delay(190);
+            Check(Enumerable.Range(0, 3).Where(index => index != hidden).All(index =>
+            {
+                var other = Cloud(panel, index);
+                return other.Template.FindName("PeekEars", other) is UIElement { IsVisible: false };
+            }), "only hidden cloud peeks");
             Render(panel, "hide-peeking");
             ClickCloud(panel, hidden);
             Check(session.Phase == PetPlayPhase.Found, "correct routed click wins");
+            Check(!speech.IsVisible, "the reveal uses motion without a text card");
             ClickCloud(panel, hidden);
             Check(session.Phase == PetPlayPhase.Found, "duplicate click cannot restart reveal");
             await Task.Delay(700);
@@ -167,7 +208,7 @@ internal static partial class Program
             Check(await database.GetStateAsync("play.last") == "hide:found", "win saved");
 
             Start(window, PetPlayKind.HideAndSeek);
-            await WaitUntil(() => session.Phase == PetPlayPhase.TimedOut, 11000,
+            await WaitUntil(() => session.Phase == PetPlayPhase.TimedOut, 13000,
                 () => $"phase={session.Phase}, remaining={session.Deadline - Environment.TickCount64}ms, suppressed={Field<bool>(window, "_isFullScreenSuppressed")}, visible={window.IsVisible}, frameTimer={Field<DispatcherTimer>(window, "_playFrameTimer").IsEnabled}");
             Check(Field<PetVisual>(panel, "RevealPet").IsVisible, "timeout reveals pet");
             await Task.Delay(600);
@@ -196,19 +237,18 @@ internal static partial class Program
             Check(!TryIdle(window, TimeSpan.Zero), "dragging blocks game");
             SetField(window, "_isPointerDown", false);
             SetField(window, "_lastPlayKind", PetPlayKind.Walk);
-            Check(TryIdle(window, TimeSpan.Zero) && session.Phase == PetPlayPhase.Hiding, "idle scheduler alternates walk to hiding");
+            Check(TryIdle(window, TimeSpan.Zero) && session.Phase == PetPlayPhase.HideGreeting, "idle scheduler alternates walk to hiding");
             window.RegisterExternalInteraction();
             SetField(window, "_playIdleSince", Environment.TickCount64 - 80000);
             SetField(window, "_lastPlayKind", PetPlayKind.HideAndSeek);
-            Check(TryIdle(window, TimeSpan.Zero) && session.Phase == PetPlayPhase.Walking, "idle scheduler alternates hiding to walk");
+            Check(TryIdle(window, TimeSpan.Zero) && session.Phase == PetPlayPhase.WalkGreeting, "idle scheduler alternates hiding to walk");
             window.RegisterExternalInteraction();
 
             // Recreate windows against the same database at each transient phase.
             foreach (var phase in new[] { PetPlayPhase.Walking, PetPlayPhase.ShowingTreasure, PetPlayPhase.Hiding })
             {
                 Start(window, phase == PetPlayPhase.Hiding ? PetPlayKind.HideAndSeek : PetPlayKind.Walk);
-                if (phase == PetPlayPhase.ShowingTreasure)
-                    await WaitUntil(() => session.Phase == PetPlayPhase.ShowingTreasure);
+                await WaitUntil(() => session.Phase == phase, 8500);
                 window.AllowClose();
                 window.Close();
                 var processInfo = new ProcessStartInfo("dotnet")
@@ -264,8 +304,7 @@ internal static partial class Program
             }
             for (var i = 0; i < WalkTreasures.All.Count; i++)
             {
-                panel.ShowWalking();
-                panel.ShowTreasure(WalkTreasures.All[i]);
+                panel.ShowSpeech(WalkTreasures.All[i].Encounter, PetPlaySession.TreasureMilliseconds);
                 artwork.SetTreasure(WalkTreasures.All[i]);
                 Render(panel, $"treasure-{i + 1}");
                 Render(artwork, $"worn-{i + 1}");
@@ -287,7 +326,7 @@ internal static partial class Program
         }
         var controls = new Window
         {
-            Title = "绵绵 v2.2.0 玩法验收", Width = 370, Height = 130, Left = 500, Top = 100,
+            Title = "绵绵玩法验收", Width = 370, Height = 130, Left = 500, Top = 100,
             Content = buttons, ResizeMode = ResizeMode.NoResize
         };
         var closed = new TaskCompletionSource();
@@ -305,36 +344,52 @@ internal static partial class Program
             Check(!Geometry.Parse(treasure.Shape).IsEmpty(), "treasure artwork parses");
             var game = new PetPlaySession();
             game.StartWalk(treasure, 100);
-            game.Advance(4099);
+            var departAt = 100 + PetPlaySession.GreetingMilliseconds;
+            Check(game.Phase == PetPlayPhase.WalkGreeting && game.Deadline == departAt, "walk opens with a short greeting");
+            game.Advance(departAt);
+            var returnAt = departAt + PetPlaySession.WalkMilliseconds;
+            game.Advance(returnAt - 1);
             Check(game.Phase == PetPlayPhase.Walking, "walk lasts four seconds");
-            game.Advance(4100);
+            game.Advance(returnAt);
+            Check(game.Phase == PetPlayPhase.Returning, "pet reappears before it speaks");
+            var speakAt = returnAt + PetPlaySession.ReturnMilliseconds;
+            game.Advance(speakAt);
             Check(game.Phase == PetPlayPhase.ShowingTreasure && game.Treasure == treasure, "walk returns chosen treasure");
-            game.Advance(11099);
+            game.Advance(speakAt + 6999);
             Check(game.Phase == PetPlayPhase.ShowingTreasure, "not removed early");
-            game.Advance(11100);
+            game.Advance(speakAt + 7000);
             Check(!game.IsActive && game.Treasure is null, "removed exactly at seven seconds");
         }
         for (var cloud = 0; cloud < 3; cloud++)
         {
             var game = new PetPlaySession();
+            var hideAt = PetPlaySession.GreetingMilliseconds;
+            var deadline = hideAt + 10000;
             game.StartHiding(cloud, 0);
-            Check(!game.ChooseCloud((cloud + 1) % 3, 500), "wrong click does not win");
-            Check(game.Deadline == 10000, "wrong click does not extend deadline");
-            Check(game.ChooseCloud(cloud, 9999), "click before deadline wins");
-            game.Advance(11799);
+            Check(!game.ChooseCloud(cloud, hideAt - 1) && game.Phase == PetPlayPhase.HideGreeting, "the opening speech cannot be guessed");
+            game.Advance(hideAt);
+            Check(!game.ChooseCloud((cloud + 1) % 3, hideAt + 500), "wrong click does not win");
+            Check(game.Deadline == deadline, "the choices stay open for ten seconds and wrong clicks do not extend it");
+            Check(game.ChooseCloud(cloud, deadline - 1), "click before deadline wins");
+            game.Advance(deadline - 1 + PetPlaySession.RevealMilliseconds);
             Check(!game.IsActive, "win finishes");
             game.StartHiding(cloud, 0);
-            Check(!game.ChooseCloud(cloud, 10000) && game.Phase == PetPlayPhase.TimedOut, "click at deadline times out without timer tick");
+            game.Advance(hideAt);
+            Check(!game.ChooseCloud(cloud, deadline) && game.Phase == PetPlayPhase.TimedOut, "click at deadline times out without timer tick");
             game.Reset();
             game.StartHiding(cloud, 0);
-            Check(!game.ChooseCloud(cloud, 15000) && game.Phase == PetPlayPhase.TimedOut, "late click after UI stall times out");
-            game.Advance(16800);
+            game.Advance(hideAt);
+            var lateClick = deadline + 5000;
+            Check(!game.ChooseCloud(cloud, lateClick) && game.Phase == PetPlayPhase.TimedOut, "late click after UI stall times out");
+            game.Advance(lateClick + PetPlaySession.RevealMilliseconds);
             Check(!game.IsActive && game.HiddenCloud == -1, "timeout clears hidden cloud");
         }
         var stalled = new PetPlaySession();
         stalled.StartWalk(WalkTreasures.All[0], 0);
+        stalled.Advance(stalled.Deadline);
+        stalled.Advance(stalled.Deadline);
         stalled.Advance(30000);
-        Check(stalled.Deadline == 37000, "late return still displays for full seven seconds");
+        Check(stalled.Deadline == 37000, "late return speech still displays for full seven seconds");
         stalled.Reset();
         Check(stalled.Treasure is null && !stalled.IsActive, "cancellation clears temporary treasure");
     }
@@ -365,10 +420,14 @@ internal static partial class Program
         }
     }
 
-    private static void Render(FrameworkElement element, string name)
+    internal static void Render(FrameworkElement element, string name)
     {
-        element.Measure(new Size(element.Width, element.Height));
-        element.Arrange(new Rect(0, 0, element.Width, element.Height));
+        if (!element.IsVisible)
+        {
+            var size = new Size(element.Width, element.Height);
+            element.Measure(size);
+            element.Arrange(new Rect(size));
+        }
         element.UpdateLayout();
         var bitmap = new RenderTargetBitmap((int)element.ActualWidth * 2, (int)element.ActualHeight * 2, 192, 192, PixelFormats.Pbgra32);
         bitmap.Render(element);
